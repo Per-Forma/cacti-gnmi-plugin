@@ -1,0 +1,25 @@
+[run]
+branch = True
+relative_files = True
+omit =
+    */tests/*
+    */venv/*
+    */__pycache__/*
+    # Operator diagnostics and standalone validation tools are not runtime paths.
+    */scripts/analyze_daemon_logs.py
+    */scripts/check_data_continuity.py
+    */scripts/gnmi_daemon_monitor.py
+    */scripts/test_bridge_reliability.py
+    */scripts/validate_bridge_comprehensive.py
+    */scripts/validate_bridge_quick.py
+
+[report]
+fail_under = 85
+precision = 1
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:

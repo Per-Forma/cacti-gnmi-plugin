@@ -1,0 +1,94 @@
+name: gnmi-srl-beta
+
+services:
+  db:
+    image: mariadb:10.6.21
+    container_name: gnmi_srl_beta_db
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD in .env}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-cacti}
+      MARIADB_USER: ${MARIADB_USER:-cacti}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-allowed-packet=128M
+      - --innodb-buffer-pool-size=512M
+      - --innodb-file-per-table=ON
+      - --join-buffer-size=32M
+      - --tmp-table-size=64M
+      - --max-heap-table-size=64M
+    volumes:
+      - ${LAB_STATE_DIR:?set LAB_STATE_DIR in .env}/db:/var/lib/mysql
+      - ./cacti/mariadb-init.sh:/docker-entrypoint-initdb.d/10-cacti-timezones.sh:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mariadb-admin ping -h 127.0.0.1 -u"$${MARIADB_USER}" -p"$${MARIADB_PASSWORD}" --silent
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 20s
+    networks:
+      - backend
+    labels:
+      com.cacti.gnmi.lab: cacti-gnmi-srl
+      com.cacti.gnmi.role: database
+
+  cacti:
+    build:
+      context: ./cacti
+      dockerfile: Dockerfile.cacti
+      args:
+        CACTI_COMMIT: 1e8eaca26b84b128c39ce8cc8ece42d7ff76aac1
+        CACTI_TARBALL_SHA256: fcc37e877e3e4c937a9cd245101784bc0961a0652f542660e8dce1e86c4e3a15
+    image: gnmi-srl-beta-cacti:1.2.31
+    container_name: gnmi_srl_beta_cacti
+    hostname: gnmi-srl-beta-cacti
+    init: true
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${MARIADB_DATABASE:-cacti}
+      DB_USER: ${MARIADB_USER:-cacti}
+      DB_PASS: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}
+      CACTI_URL_PATH: /cacti/
+      CACTI_AUTO_INSTALL: "1"
+      GNMI_RUNTIME_DIR: /var/www/html/cacti/plugins/gnmi/runtime
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - ${CACTI_UI_BIND:-0.0.0.0}:${CACTI_UI_PORT:-7083}:80
+    volumes:
+      - ${LAB_STATE_DIR:?set LAB_STATE_DIR in .env}/rra:/var/www/html/cacti/rra
+      - ${LAB_STATE_DIR:?set LAB_STATE_DIR in .env}/log:/var/www/html/cacti/log
+      - ${LAB_STATE_DIR:?set LAB_STATE_DIR in .env}/cache:/var/www/html/cacti/cache
+      - ${LAB_STATE_DIR:?set LAB_STATE_DIR in .env}/plugin:/var/www/html/cacti/plugins/gnmi
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://127.0.0.1/cacti/index.php >/dev/null || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 45s
+    networks:
+      backend: {}
+      gnmi_mgmt:
+        ipv4_address: ${CACTI_MGMT_IPV4:-10.253.0.20}
+    labels:
+      com.cacti.gnmi.lab: cacti-gnmi-srl
+      com.cacti.gnmi.role: cacti
+
+networks:
+  backend:
+    name: gnmi_srl_beta_backend
+    internal: true
+  gnmi_mgmt:
+    name: gnmi_srl_beta_mgmt
+    external: true

@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a reproducible problem with the plugin.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove credentials, certificates, private keys, telemetry, and customer
+        information before submitting. Use the private security process for vulnerabilities.
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      placeholder: 1.0.0-beta.1
+    validations:
+      required: true
+  - type: input
+    id: cacti-version
+    attributes:
+      label: Cacti version
+      placeholder: 1.2.31
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: PHP and Python versions
+      placeholder: PHP 8.1.34; Python 3.12.10
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: gNMI platform
+      description: Vendor and software version, if relevant.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I removed all sensitive information.
+          required: true
+        - label: I searched existing issues for this problem.
+          required: true

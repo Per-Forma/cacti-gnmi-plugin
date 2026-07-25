@@ -1,0 +1,26 @@
+# gNMI Cacti Plugin - Python Dependencies
+# Python 3.12+ required
+# Install in virtual environment: pip install -r requirements.txt
+
+# Packaging tool retained in the runtime venv
+pip==26.1.2
+
+# gNMI protocol library
+pygnmi==0.8.15
+
+# RRD database bindings
+# Note: Requires rrdtool system package to be installed
+# Ubuntu/Debian: apt-get install librrd-dev
+# RHEL/CentOS: yum install rrdtool-devel
+# macOS: brew install rrdtool
+rrdtool-bindings==0.5.0
+
+# gRPC dependencies (pygnmi dependencies, pinned for stability)
+grpcio==1.83.0
+protobuf==7.35.1
+
+# Utilities
+pyyaml==6.0.3
+
+# Database access for bridge script
+pymysql==1.2.0

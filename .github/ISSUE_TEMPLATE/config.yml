@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and support
+    url: https://github.com/Per-Forma/cacti-gnmi-plugin/discussions
+    about: Ask setup questions and discuss usage.
+  - name: Private security report
+    url: https://github.com/Per-Forma/cacti-gnmi-plugin/security
+    about: Report suspected vulnerabilities privately.

@@ -1,0 +1,199 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install RRDtool development libraries
+        run: sudo apt-get update && sudo apt-get install -y librrd-dev rrdtool
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: scripts/requirements*.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r scripts/requirements-dev.txt
+
+      - name: Run Python tests
+        run: python -m pytest
+
+  php:
+    name: PHP ${{ matrix.php }} syntax
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.1", "8.5"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Check PHP syntax
+        shell: bash
+        run: |
+          mapfile -d '' files < <(find . -name '*.php' -print0)
+          for file in "${files[@]}"; do
+            php -l "$file"
+          done
+
+  repository:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject generated or sensitive artifacts
+        shell: bash
+        run: |
+          forbidden=$(find . -path './.git' -prune -o -type f \( \
+            -name '*.rrd' -o -name '*.pem' -o -name '*.key' -o \
+            -name '*.crt' -o -name '*.p12' -o -name '*.pfx' -o \
+            -name '*.pyc' -o -name '.env' -o -name '.coverage' \
+          \) -print)
+          if [[ -n "$forbidden" ]]; then
+            printf 'Forbidden repository artifacts:\n%s\n' "$forbidden"
+            exit 1
+          fi
+
+      - name: Validate metadata
+        shell: bash
+        run: |
+          setup_version=$(sed -nE "s/.*'version'[[:space:]]*=>[[:space:]]*'([^']+)'.*/\1/p" setup.php | head -1)
+          info_version=$(awk -F ' *= *' '$1 == "version" { print $2; exit }' INFO)
+          test "$setup_version" = "$info_version"
+          test "$(awk -F ' *= *' '$1 == "compat" { print $2; exit }' INFO)" = "1.2.25+"
+          test "$(awk -F ' *= *' '$1 == "license" { print $2; exit }' INFO)" = "GPL-2.0-or-later"
+
+      - name: Smoke-test prerelease packaging
+        run: deployment/package_release.sh --allow-dirty 1.0.0-beta.1
+
+      - name: Inspect packaged artifact
+        shell: bash
+        run: |
+          tarball=$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)
+          test -n "$tarball"
+          tar tzf "$tarball" >/dev/null
+          (
+            cd "$(dirname "$tarball")"
+            shasum -a 256 -c "$(basename "$tarball").sha256"
+          )
+
+  php-harness:
+    name: Cacti 1.2.31 PHP harnesses
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure disposable Cacti stack
+        shell: bash
+        run: |
+          env_file=tests/integration/cacti_compat/.env
+          {
+            echo "TZ=UTC"
+            echo "COMPOSE_PROJECT_NAME=gnmi-ci"
+            echo "CACTI_VERSION=1.2.31"
+            echo "CACTI_COMMIT=1e8eaca26b84b128c39ce8cc8ece42d7ff76aac1"
+            echo "CACTI_TARBALL_SHA256=fcc37e877e3e4c937a9cd245101784bc0961a0652f542660e8dce1e86c4e3a15"
+            echo "CACTI_IMAGE=gnmi-cacti-ci:1.2.31"
+            echo "CACTI_CONTAINER=gnmi_cacti_ci"
+            echo "DB_CONTAINER=gnmi_cacti_ci_db"
+            echo "STATE_DIR=$RUNNER_TEMP/gnmi-cacti-ci"
+            echo "CACTI_UI_BIND=127.0.0.1"
+            echo "CACTI_UI_PORT=7083"
+            echo "MARIADB_IMAGE=mariadb:10.6.21"
+            echo "MARIADB_DATABASE=cacti"
+            echo "MARIADB_USER=cacti"
+            echo "MARIADB_PASSWORD=ci-database-password"
+            echo "MARIADB_ROOT_PASSWORD=ci-root-password"
+          } >"$env_file"
+          mkdir -p "$RUNNER_TEMP/gnmi-cacti-ci"/{db,rra,log,cache,plugin}
+
+      - name: Start Cacti
+        shell: bash
+        run: |
+          docker compose \
+            --env-file tests/integration/cacti_compat/.env \
+            -f tests/integration/cacti_compat/compose.yaml \
+            up -d --build
+          for attempt in $(seq 1 90); do
+            health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' gnmi_cacti_ci 2>/dev/null || true)
+            if [[ "$health" == healthy ]]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          docker logs gnmi_cacti_ci
+          exit 1
+
+      - name: Deploy and enable plugin
+        shell: bash
+        run: |
+          ./deploy_plugin.sh gnmi_cacti_ci:/var/www/html/cacti/plugins/gnmi/
+          docker cp tests/. \
+            gnmi_cacti_ci:/var/www/html/cacti/plugins/gnmi/tests/
+          docker exec -u root gnmi_cacti_ci \
+            chown -R www-data:www-data /var/www/html/cacti/plugins/gnmi
+          docker exec -u www-data gnmi_cacti_ci \
+            php /var/www/html/cacti/cli/plugin_manage.php \
+            --plugin=gnmi --install --allperms
+          docker exec -u www-data gnmi_cacti_ci \
+            php /var/www/html/cacti/cli/plugin_manage.php \
+            --plugin=gnmi --enable --allperms
+
+      - name: Run standalone PHP harnesses
+        shell: bash
+        run: |
+          docker exec -u www-data gnmi_cacti_ci sh -lc '
+            set -e
+            for test in /var/www/html/cacti/plugins/gnmi/tests/daemon_lifecycle/*.php; do
+              php "$test"
+            done
+            for test in /var/www/html/cacti/plugins/gnmi/tests/status_dashboard/*.php; do
+              php "$test"
+            done
+          '
+
+      - name: Show Cacti logs after failure
+        if: failure()
+        run: |
+          docker logs gnmi_cacti_ci || true
+          docker exec gnmi_cacti_ci tail -n 300 /var/www/html/cacti/log/cacti.log || true
+
+      - name: Stop disposable stack
+        if: always()
+        run: |
+          docker compose \
+            --env-file tests/integration/cacti_compat/.env \
+            -f tests/integration/cacti_compat/compose.yaml \
+            down --remove-orphans

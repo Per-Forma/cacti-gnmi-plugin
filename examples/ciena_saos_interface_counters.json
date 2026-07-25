@@ -1,0 +1,28 @@
+{
+  "_comment": "Reference template for the Cacti gNMI plugin. Transcribe into the device edit form; this is not an import file. See examples/README.md and docs/ciena_yang_reference.md.",
+  "platform": "Ciena SAOS 10.x (5171)",
+  "path_style": "Ciena cn-if: augment (OpenConfig-derived)",
+  "connection": {
+    "port": 9339,
+    "port_note": "Ciena gNMI commonly listens on 9339. Ciena devices do not answer the gNMI Capabilities RPC; the plugin's pygnmi_patch.py handles this automatically.",
+    "use_tls": true,
+    "encoding": "JSON_IETF"
+  },
+  "subscriptions": [
+    {
+      "path": "Ciena:cn-if:interface-telemetry-state/interface-counters[interface-type=ettp]/interfaces[if-name=40]/counters",
+      "instance": "ettp-40",
+      "instance_note": "Instance label encodes interface-type + if-name. Create one subscription per interface (e.g. ettp-34, ettp-40), each with a unique instance.",
+      "metrics": [
+        { "metric_name": "in-octets",         "cacti_field_name": "in_octets",     "rrd_type": "COUNTER", "note": "counter64, ifHCInOctets" },
+        { "metric_name": "out-octets",        "cacti_field_name": "out_octets",    "rrd_type": "COUNTER", "note": "counter64, ifHCOutOctets" },
+        { "metric_name": "in-pkts",           "cacti_field_name": "in_pkts",       "rrd_type": "COUNTER", "note": "Ciena-added total inbound packets" },
+        { "metric_name": "out-pkts",          "cacti_field_name": "out_pkts",      "rrd_type": "COUNTER", "note": "Ciena-added total outbound packets" },
+        { "metric_name": "in-errors",         "cacti_field_name": "in_errors",     "rrd_type": "COUNTER", "note": "counter64, ifInErrors" },
+        { "metric_name": "out-errors",        "cacti_field_name": "out_errors",    "rrd_type": "COUNTER", "note": "counter64, ifOutErrors" },
+        { "metric_name": "in-discards",       "cacti_field_name": "in_discards",   "rrd_type": "COUNTER", "note": "counter64, ifInDiscards (portable; prefer over in-dropped-pkts)" },
+        { "metric_name": "in-crc-error-pkts", "cacti_field_name": "in_crc_err_pkts","rrd_type": "COUNTER", "note": "Ciena-specific name (OpenConfig standard is in-crc-errors)" }
+      ]
+    }
+  ]
+}

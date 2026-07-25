@@ -1,0 +1,53 @@
+# Runtime state and generated telemetry
+runtime/
+storage/
+certs/
+logs/
+*.rrd
+*.log
+*.pid
+*.tmp
+**/.tmp_device_*.json
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+credentials.json
+*secret*.json
+*password*.txt
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Build and release output
+dist/
+build/
+.state/
+evidence/
+*.tar.gz
+*.sha256
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

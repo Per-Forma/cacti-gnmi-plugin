@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "encoding": "json_ietf",
+  "sample_interval_seconds": 5,
+  "subscriptions": [
+    {
+      "path": "/interface[name=ethernet-1/1]/statistics",
+      "instance_identifier": "ethernet-1/1",
+      "metrics": [
+        {"gnmi_leaf": "in-octets", "cacti_field": "in_octets", "rrd_type": "COUNTER", "required": true},
+        {"gnmi_leaf": "out-octets", "cacti_field": "out_octets", "rrd_type": "COUNTER", "required": true},
+        {"gnmi_leaf": "in-unicast-packets", "cacti_field": "in_pkts", "rrd_type": "COUNTER", "required": true},
+        {"gnmi_leaf": "out-unicast-packets", "cacti_field": "out_pkts", "rrd_type": "COUNTER", "required": true},
+        {"gnmi_leaf": "in-error-packets", "cacti_field": "in_errors", "rrd_type": "COUNTER", "required": false},
+        {"gnmi_leaf": "out-error-packets", "cacti_field": "out_errors", "rrd_type": "COUNTER", "required": false}
+      ]
+    },
+    {
+      "path": "/interface[name=ethernet-1/2]/statistics",
+      "instance_identifier": "ethernet-1/2",
+      "metrics": [
+        {"gnmi_leaf": "in-octets", "cacti_field": "in_octets", "rrd_type": "COUNTER", "required": true},
+        {"gnmi_leaf": "out-octets", "cacti_field": "out_octets", "rrd_type": "COUNTER", "required": true},
+        {"gnmi_leaf": "in-unicast-packets", "cacti_field": "in_pkts", "rrd_type": "COUNTER", "required": true},
+        {"gnmi_leaf": "out-unicast-packets", "cacti_field": "out_pkts", "rrd_type": "COUNTER", "required": true},
+        {"gnmi_leaf": "in-error-packets", "cacti_field": "in_errors", "rrd_type": "COUNTER", "required": false},
+        {"gnmi_leaf": "out-error-packets", "cacti_field": "out_errors", "rrd_type": "COUNTER", "required": false}
+      ]
+    }
+  ]
+}

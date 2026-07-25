@@ -1,0 +1,27 @@
+{
+  "_comment": "Reference template for the Cacti gNMI plugin. Transcribe into the device edit form; this is not an import file. See examples/README.md.",
+  "platform": "Arista EOS",
+  "path_style": "OpenConfig",
+  "connection": {
+    "port": 6030,
+    "port_note": "Arista commonly exposes gNMI on 6030 (management api gnmi). Confirm on your switch.",
+    "use_tls": true,
+    "encoding": "JSON_IETF"
+  },
+  "subscriptions": [
+    {
+      "path": "openconfig-interfaces:interfaces/interface[name=Ethernet1]/state/counters",
+      "instance": "Ethernet1",
+      "metrics": [
+        { "metric_name": "in-octets",         "cacti_field_name": "in_octets",     "rrd_type": "COUNTER" },
+        { "metric_name": "out-octets",        "cacti_field_name": "out_octets",    "rrd_type": "COUNTER" },
+        { "metric_name": "in-unicast-pkts",   "cacti_field_name": "in_ucast_pkts", "rrd_type": "COUNTER" },
+        { "metric_name": "out-unicast-pkts",  "cacti_field_name": "out_ucast_pkts","rrd_type": "COUNTER" },
+        { "metric_name": "in-errors",         "cacti_field_name": "in_errors",     "rrd_type": "COUNTER" },
+        { "metric_name": "out-errors",        "cacti_field_name": "out_errors",    "rrd_type": "COUNTER" },
+        { "metric_name": "in-discards",       "cacti_field_name": "in_discards",   "rrd_type": "COUNTER" },
+        { "metric_name": "out-discards",      "cacti_field_name": "out_discards",  "rrd_type": "COUNTER" }
+      ]
+    }
+  ]
+}

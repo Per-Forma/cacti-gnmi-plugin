@@ -1,0 +1,10 @@
+[info]
+name = gnmi
+version = 1.0.0-beta.1
+longname = gNMI Telemetry Collection for Cacti
+author = Jarred Masterson
+email = jarred.masterson@gmail.com
+homepage = https://github.com/Per-Forma/cacti-gnmi-plugin
+compat = 1.2.25+
+php_version = 8.1.0+
+license = GPL-2.0-or-later

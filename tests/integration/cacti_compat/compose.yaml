@@ -1,0 +1,81 @@
+name: ${COMPOSE_PROJECT_NAME:?set COMPOSE_PROJECT_NAME in .env}
+
+services:
+  db:
+    image: ${MARIADB_IMAGE:-mariadb:10.6.21}
+    container_name: ${DB_CONTAINER:?set DB_CONTAINER in .env}
+    environment:
+      TZ: ${TZ:-UTC}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD in .env}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-cacti}
+      MARIADB_USER: ${MARIADB_USER:-cacti}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-allowed-packet=128M
+      - --innodb-buffer-pool-size=256M
+      - --innodb-file-per-table=ON
+    volumes:
+      - ${STATE_DIR:?set STATE_DIR in .env}/db:/var/lib/mysql
+      - ../srlinux/cacti/mariadb-init.sh:/docker-entrypoint-initdb.d/10-cacti-timezones.sh:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mariadb-admin ping -h 127.0.0.1 -u"$${MARIADB_USER}" -p"$${MARIADB_PASSWORD}" --silent
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 20s
+    networks:
+      - backend
+
+  cacti:
+    build:
+      context: ../srlinux/cacti
+      dockerfile: Dockerfile.cacti
+      args:
+        CACTI_VERSION: ${CACTI_VERSION:?set CACTI_VERSION in .env}
+        CACTI_COMMIT: ${CACTI_COMMIT:?set CACTI_COMMIT in .env}
+        CACTI_TARBALL_SHA256: ${CACTI_TARBALL_SHA256:?set CACTI_TARBALL_SHA256 in .env}
+    image: ${CACTI_IMAGE:?set CACTI_IMAGE in .env}
+    container_name: ${CACTI_CONTAINER:?set CACTI_CONTAINER in .env}
+    hostname: ${CACTI_CONTAINER:?set CACTI_CONTAINER in .env}
+    init: true
+    environment:
+      TZ: ${TZ:-UTC}
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${MARIADB_DATABASE:-cacti}
+      DB_USER: ${MARIADB_USER:-cacti}
+      DB_PASS: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}
+      CACTI_URL_PATH: /cacti/
+      CACTI_AUTO_INSTALL: "1"
+      GNMI_RUNTIME_DIR: /var/www/html/cacti/plugins/gnmi/runtime
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - ${CACTI_UI_BIND:-0.0.0.0}:${CACTI_UI_PORT:?set CACTI_UI_PORT in .env}:80
+    volumes:
+      - ${STATE_DIR:?set STATE_DIR in .env}/rra:/var/www/html/cacti/rra
+      - ${STATE_DIR:?set STATE_DIR in .env}/log:/var/www/html/cacti/log
+      - ${STATE_DIR:?set STATE_DIR in .env}/cache:/var/www/html/cacti/cache
+      - ${STATE_DIR:?set STATE_DIR in .env}/plugin:/var/www/html/cacti/plugins/gnmi
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://127.0.0.1/cacti/index.php >/dev/null || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 45s
+    networks:
+      - backend
+    labels:
+      com.cacti.gnmi.test: compatibility
+      com.cacti.gnmi.cacti-version: ${CACTI_VERSION:?set CACTI_VERSION in .env}
+      org.opencontainers.image.revision: ${CACTI_COMMIT:?set CACTI_COMMIT in .env}
+
+networks:
+  backend: {}

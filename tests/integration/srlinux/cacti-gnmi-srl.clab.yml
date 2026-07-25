@@ -1,0 +1,41 @@
+name: cacti-gnmi-srl
+
+mgmt:
+  network: gnmi_srl_beta_mgmt
+  ipv4-subnet: 10.253.0.0/20
+  external-access: false
+
+topology:
+  defaults:
+    env:
+      TZ: UTC
+
+  nodes:
+    srl1:
+      kind: nokia_srlinux
+      type: ixr-d2l
+      image: ghcr.io/nokia/srlinux:26.3.3
+      startup-config: srl1.cli
+      mgmt-ipv4: 10.253.0.10
+
+    client1:
+      kind: linux
+      image: ghcr.io/srl-labs/network-multitool:sha-ccaa771
+      mgmt-ipv4: 10.253.0.11
+      exec:
+        - ip link set dev eth1 up
+        - ip address replace 192.0.2.2/30 dev eth1
+        - ip route replace 198.51.100.0/30 via 192.0.2.1 dev eth1
+
+    client2:
+      kind: linux
+      image: ghcr.io/srl-labs/network-multitool:sha-ccaa771
+      mgmt-ipv4: 10.253.0.12
+      exec:
+        - ip link set dev eth1 up
+        - ip address replace 198.51.100.2/30 dev eth1
+        - ip route replace 192.0.2.0/30 via 198.51.100.1 dev eth1
+
+  links:
+    - endpoints: ["srl1:ethernet-1/1", "client1:eth1"]
+    - endpoints: ["srl1:ethernet-1/2", "client2:eth1"]
