@@ -176,7 +176,7 @@ changes.
 | Create a graph now | Metric row → **Create Graph** |
 | Put a graph on a tree | Management → Graph Trees (manual) |
 | Check device health | Plugins → gNMI Telemetry (dashboard) |
-| Restart a daemon | `docker_helpers/restart_daemon.sh <device_id>` |
+| Restart a daemon | Plugins → gNMI Telemetry → device row → **Restart** |
 | Inspect raw data | `cat plugins/gnmi/runtime/storage/device_<id>.json` |
 
 ---
