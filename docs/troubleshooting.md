@@ -467,24 +467,26 @@ seq 1 20 | xargs -n1 -P20 -I{} docker exec cacti_app python3 \
 
 ---
 
-## Comprehensive Testing
+## Combined diagnostic run
 
-Run all diagnostic tests at once:
+The repository does not bundle an all-in-one diagnostic wrapper. To collect a
+five-minute diagnostic set using the supported tools above:
+
+1. Run the **Daemon Monitor** and **Data Continuity Checker** in separate
+   shells with `--duration 300`.
+2. Run both **Bridge Reliability Tester** loops with the correct device and
+   local data-source IDs.
+3. Copy the daemon log and run the **Log Analyzer**.
+4. Capture the current storage state:
 
 ```bash
-cd /path/to/cacti-plugin/docker_helpers
-./run_robustness_tests.sh 1 300  # device_id=1, duration=300s
+docker exec cacti_app cat \
+  /var/www/html/cacti/plugins/gnmi/runtime/storage/device_1.json \
+  > /tmp/gnmi-device-1-storage.json
 ```
 
-This runs:
-1. Health check
-2. 5-minute continuity check
-3. 100 sequential bridge calls
-4. 20 concurrent bridge calls
-5. Full log analysis
-6. Storage state snapshot
-
-**Output:** Timestamped directory in `/tmp/` with all results
+Preserve the monitor CSV, command output, analyzed log, and storage snapshot
+together when attaching a sanitized diagnostic set to an issue.
 
 ---
 

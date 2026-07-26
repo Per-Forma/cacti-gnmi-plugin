@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Replaced references to nonexistent operator helper scripts with the supported
+  dashboard restart action and diagnostic-tool workflow.
+
 ## [1.0.0-beta.1] - 2026-07-24
 
 ### Added
