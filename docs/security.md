@@ -82,14 +82,6 @@ Paths outside the protected runtime certificate directory are rejected.
 - Track certificate expiry — an expired device cert breaks the subscription and
   the dashboard will show the device as `critical`.
 
-### Ciena note
-
-The validated Ciena SAOS 10.8 target did not respond to the gNMI `Capabilities`
-RPC. When the explicit Ciena compatibility mode is selected, the plugin applies
-`scripts/gnmi_collector/pygnmi_patch.py` to bypass that call. This shim is not a
-security control and is not enabled for standard gNMI targets. See
-[compatibility.md](compatibility.md).
-
 ---
 
 ## 3. Network requirements
