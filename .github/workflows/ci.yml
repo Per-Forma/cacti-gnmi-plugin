@@ -94,6 +94,9 @@ jobs:
           test "$(awk -F ' *= *' '$1 == "compat" { print $2; exit }' INFO)" = "1.2.25+"
           test "$(awk -F ' *= *' '$1 == "license" { print $2; exit }' INFO)" = "GPL-2.0-or-later"
 
+      - name: Validate public documentation
+        run: python -m unittest tests.test_public_docs
+
       - name: Smoke-test prerelease packaging
         run: deployment/package_release.sh --allow-dirty 1.0.0-beta.1
 

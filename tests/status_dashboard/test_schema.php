@@ -1,8 +1,8 @@
 <?php
 /**
- * Unit Tests for Database Schema (Phase 3.2)
+ * Tests for the current public-beta database schema.
  *
- * Tests plugin_gnmi_events table structure, indexes, and foreign keys.
+ * Validates the four active plugin tables, key columns, and event behavior.
  *
  * Run: php test_schema.php
  */
@@ -50,7 +50,50 @@ function assert_true($condition, $message) {
 	}
 }
 
-echo "=== gNMI Schema Tests (Phase 3.2) ===\n\n";
+echo "=== gNMI Current Schema Tests ===\n\n";
+
+function test_current_table_set() {
+	$rows = db_fetch_assoc("SELECT table_name AS table_name_value
+		FROM information_schema.tables
+		WHERE table_schema = DATABASE()
+		AND table_name LIKE 'plugin_gnmi_%'
+		ORDER BY table_name");
+	$actual = array_map(function ($row) {
+		return $row['table_name_value'];
+	}, $rows);
+	$expected = array(
+		'plugin_gnmi_devices',
+		'plugin_gnmi_events',
+		'plugin_gnmi_metrics',
+		'plugin_gnmi_subscriptions',
+	);
+	assert_equals($expected, $actual, 'Only the four current plugin tables should exist');
+}
+
+function test_current_schema_columns() {
+	$required = array(
+		'plugin_gnmi_devices' => array('hostname_source', 'compatibility_mode'),
+		'plugin_gnmi_subscriptions' => array('auto_create_datasources', 'auto_create_graphs'),
+		'plugin_gnmi_metrics' => array(
+			'subscription_id', 'rrd_type', 'metric_group', 'metric_direction',
+			'metric_graph_key', 'graph_created', 'local_data_id', 'graph_local_id',
+		),
+		'plugin_gnmi_events' => array('device_id', 'event_type', 'event_data', 'created_at'),
+	);
+
+	foreach ($required as $table => $columns) {
+		$rows = db_fetch_assoc("SELECT column_name AS column_name_value
+			FROM information_schema.columns
+			WHERE table_schema = DATABASE()
+			AND table_name = '$table'");
+		$actual = array_map(function ($row) {
+			return $row['column_name_value'];
+		}, $rows);
+		foreach ($columns as $column) {
+			assert_true(in_array($column, $actual, true), "$table.$column should exist");
+		}
+	}
+}
 
 // Test 1: Table existence
 function test_events_table_exists() {
@@ -189,6 +232,8 @@ function test_cascade_delete() {
 
 // Run all tests
 echo "Running schema tests...\n\n";
+test_current_table_set();
+test_current_schema_columns();
 test_events_table_exists();
 test_events_table_columns();
 test_device_id_foreign_key();

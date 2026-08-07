@@ -5,10 +5,10 @@ state: installing system prerequisites, deploying the plugin files, installing
 the Python environment, enabling the plugin in Cacti, and configuring your first
 device.
 
-> **Release-candidate policy:** RC artifacts are fresh-install only. Install into a
+> **Public-beta policy:** Beta artifacts are fresh-install only. Install into a
 > clean test Cacti environment only; do not use them in production or upgrade an
 > existing gNMI plugin deployment. Migration from an earlier plugin schema and
-> automated downgrade are not supported by this RC.
+> automated downgrade are not supported by this public beta.
 
 > **Audience:** Cacti administrators with shell access to the poller host (or
 > the Cacti container). You need `root`/`sudo` to install system packages.
@@ -26,7 +26,7 @@ device.
 | OS        | Linux with `/proc` | Daemon health metrics (uptime, memory) read from `/proc`. |
 
 Cacti 1.2.24 and earlier are unsupported. They may run the collection path,
-but they lack `api_data_input_remove()`, so this RC cannot guarantee a clean,
+but they lack `api_data_input_remove()`, so this beta cannot guarantee a clean,
 safe uninstall.
 
 The plugin runs one **long-running Python daemon per gNMI device**. Plan for
@@ -165,7 +165,7 @@ venv/bin/python3 -m pip install -r scripts/requirements-dev.txt
 
 On install the plugin:
 - Creates its database tables (`plugin_gnmi_devices`, `plugin_gnmi_subscriptions`,
-  `plugin_gnmi_metrics`, `plugin_gnmi_device_metrics`, `plugin_gnmi_events`).
+  `plugin_gnmi_metrics`, and `plugin_gnmi_events`).
 - Registers its poller and form hooks (inactive until the plugin is enabled).
 - Registers the Status Dashboard realm so it appears under **Console → Plugins**.
 - Provisions the `gNMI - Passthrough` data input/template and the graph
@@ -236,19 +236,15 @@ per-device health, daemon uptime, and data freshness.
 
 ## 7. Upgrading
 
-> **Not supported by this public beta.** The steps below apply only after the
-> upgrade-migration track is validated in a later release. Repeated
-> application of the currently supported schema helpers is covered by automated
-> tests for schema stability and data preservation, but that does not make an
-> older gNMI schema upgrade-safe.
+Upgrading an earlier private or development schema is not supported by this
+public beta. The installer detects the retired assignment tables and older
+metric layout before making changes, leaves them untouched, and reports that a
+fresh installation is required.
 
-1. Re-deploy with `deploy_plugin.sh` (overwrites code; leaves the database and
-   `storage/` intact).
-2. Load any plugin page. `plugin_gnmi_upgrade()` runs idempotent schema
-   migrations (e.g. the Phase 3.4 `auto_create_graphs`, `metric_group`,
-   `metric_direction`, `graph_created` columns).
-3. Confirm tests/health, then resume normal operation. Daemons are restarted
-   automatically when their config changes.
+The idempotent `plugin_gnmi_upgrade()` helpers reconcile additions within the
+current public schema, but they are not a migration path from an older plugin
+design. Back up the Cacti database and RRD directory, uninstall the earlier
+build, and install this beta into a clean plugin schema.
 
 ---
 

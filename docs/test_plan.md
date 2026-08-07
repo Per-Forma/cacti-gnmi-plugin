@@ -132,7 +132,7 @@ validate migration from an earlier gNMI plugin schema.
 
 - [install.md](install.md) · [user_guide.md](user_guide.md) · [security.md](security.md)
 - [troubleshooting.md](troubleshooting.md) — diagnostics referenced by Suite 5
-- [../tests/integration/cacti_compat/README.md](../tests/integration/cacti_compat/README.md)
+- [Cacti compatibility harness](https://github.com/Per-Forma/cacti-gnmi-plugin/tree/main/tests/integration/cacti_compat)
   — Cacti compatibility harness
-- [../tests/integration/srlinux/README.md](../tests/integration/srlinux/README.md)
+- [SR Linux integration harness](https://github.com/Per-Forma/cacti-gnmi-plugin/tree/main/tests/integration/srlinux)
   — SR Linux interoperability harness

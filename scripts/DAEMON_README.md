@@ -1,6 +1,6 @@
 # gNMI Daemon Documentation
 
-**Status:** Release-candidate operator reference
+**Status:** Public-beta operator reference
 
 ---
 
@@ -313,14 +313,14 @@ telnet <host> 57400
 
 ### Scaling note
 
-The RC uses one daemon per enabled device. Validate resource use at the intended
+The public beta uses one daemon per enabled device. Validate resource use at the intended
 device count before broader testing.
 
 ---
 
 ## Security Considerations
 
-### Current RC behavior
+### Current public-beta behavior
 
 - ⚠️ Passwords stored in plaintext in config files
 - ⚠️ Config files readable by daemon user
@@ -367,5 +367,5 @@ encryption/vaulting and automated credential rotation are not provided.
 - ✅ PID file management
 - ✅ Atomic JSON writes
 
-Current release-candidate validation and known limitations are recorded in the
+Current public-beta validation and known limitations are recorded in the
 top-level `RELEASE_NOTES.md` included with the distribution.

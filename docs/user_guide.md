@@ -94,7 +94,8 @@ For each leaf you want to collect, add a metric:
 - **RRD Type** — `COUNTER` for monotonically increasing counters (octets,
   packets, errors), `GAUGE` for instantaneous values (utilization, temperature).
 
-See [examples/](../examples/) for ready-to-paste path + metric sets for Arista,
+See the [subscription examples](https://github.com/Per-Forma/cacti-gnmi-plugin/tree/main/examples)
+for ready-to-paste path + metric sets for Arista,
 Cisco, Juniper, and Ciena.
 
 ### Edit / disable / delete
@@ -206,6 +207,6 @@ For the full diagnostic playbook see [troubleshooting.md](troubleshooting.md).
 
 - [install.md](install.md) — installation and first-device setup
 - [security.md](security.md) — credentials, TLS/mTLS, hardening
-- [examples/](../examples/) — per-vendor subscription/metric templates
+- [Subscription examples](https://github.com/Per-Forma/cacti-gnmi-plugin/tree/main/examples) — per-vendor subscription/metric templates
 - [troubleshooting.md](troubleshooting.md) — detailed diagnostics
 - [architecture.md](architecture.md) — data-flow internals

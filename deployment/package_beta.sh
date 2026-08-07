@@ -98,7 +98,7 @@ PACKAGE_NAME="cacti-gnmi-plugin-$VERSION"
 DIST_DIR="$PROJECT_ROOT/dist"
 PACKAGE_DIR="$WORK_DIR/$PACKAGE_NAME"
 
-mkdir -p "$PACKAGE_DIR/gnmi" "$PACKAGE_DIR/docs" "$DIST_DIR"
+mkdir -p "$PACKAGE_DIR/gnmi/docs" "$PACKAGE_DIR/docs" "$DIST_DIR"
 
 copy_item() {
 	local item="$1"
@@ -116,6 +116,8 @@ copy_item "test_connection.php"
 copy_item "pages"
 copy_item "include"
 copy_item "README.md"
+cp "$SOURCE_ROOT/SECURITY.md" "$PACKAGE_DIR/gnmi/"
+cp "$SOURCE_ROOT/CONTRIBUTING.md" "$PACKAGE_DIR/gnmi/"
 
 mkdir -p "$PACKAGE_DIR/gnmi/scripts/gnmi_collector"
 for script_item in \
@@ -127,11 +129,8 @@ for script_item in \
 done
 cp -R "$PLUGIN_DIR/scripts/gnmi_collector/." "$PACKAGE_DIR/gnmi/scripts/gnmi_collector/"
 
-cp "$SOURCE_ROOT/docs/install.md" "$PACKAGE_DIR/docs/"
-cp "$SOURCE_ROOT/docs/user_guide.md" "$PACKAGE_DIR/docs/"
-cp "$SOURCE_ROOT/docs/security.md" "$PACKAGE_DIR/docs/"
-cp "$SOURCE_ROOT/docs/troubleshooting.md" "$PACKAGE_DIR/docs/"
-cp "$SOURCE_ROOT/docs/compatibility.md" "$PACKAGE_DIR/docs/"
+cp "$SOURCE_ROOT"/docs/*.md "$PACKAGE_DIR/docs/"
+cp "$SOURCE_ROOT"/docs/*.md "$PACKAGE_DIR/gnmi/docs/"
 cp "$SOURCE_ROOT/LICENSE" "$PACKAGE_DIR/LICENSE"
 cp "$SOURCE_ROOT/LICENSE" "$PACKAGE_DIR/gnmi/LICENSE"
 
@@ -175,7 +174,7 @@ Source: $SOURCE_DESCRIPTION
 ## Contents
 
 - \`gnmi/\`: deployable Cacti plugin directory.
-- \`docs/\`: installation, user, security, troubleshooting, and compatibility docs.
+- \`docs/\`: complete operator, architecture, schema, and troubleshooting documentation.
 - \`${RELEASE_LABEL}_README.md\`: prerelease installation and test flow.
 - \`LICENSE\`: GNU General Public License version 2 or later.
 - \`RELEASE_NOTES.md\`: release-specific changes, validation, and limitations.

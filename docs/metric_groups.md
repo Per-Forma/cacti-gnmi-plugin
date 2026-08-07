@@ -1,480 +1,132 @@
-# gNMI Metric Groups Definition
+# Metric classification and graph grouping
 
-**Phase:** 2.6 - Cacti Data Source Integration
-**Date:** October 13, 2025
-**Purpose:** Define logical groupings of gNMI metrics for Cacti integration
+The plugin does not ship a fixed inventory of vendor metrics. Operators create
+subscriptions and add the metric leaves exposed by each gNMI target. The plugin
+stores those definitions, creates Cacti data sources, and classifies metric
+names only to choose an automatic graph layout.
 
----
+## Paths and platform scope
 
-## Overview
+Subscription paths are passed to the target as configured. They may use
+OpenConfig, a vendor-native model, or another model supported by the device.
+The collector does not require a Ciena-specific path format.
 
-Metrics collected from gNMI devices are organized into logical groups. Each group becomes a Cacti Data Input Method and Data Source Template, allowing flexible and efficient data collection.
+The repository includes ready-to-transcribe examples for OpenConfig on Arista
+EOS, Cisco IOS XR, and Juniper Junos, plus a Ciena SAOS 10 path. See the
+[subscription examples](https://github.com/Per-Forma/cacti-gnmi-plugin/tree/main/examples).
+Nokia SR Linux OpenConfig paths are exercised by the
+[Containerlab integration harness](https://github.com/Per-Forma/cacti-gnmi-plugin/tree/main/tests/integration/srlinux).
 
----
+Ciena SAOS 10 targets that exhibit the validated capability/subscription issue
+require the explicit `ciena_saos10` compatibility mode described in
+[Compatibility](compatibility.md). Standard targets retain native pygnmi
+capability discovery and subscription handling.
 
-## Grouping Strategy (Option B: Logical Groups)
+## Metric definition
 
-Metrics are grouped by function/purpose rather than having one large group or many tiny groups. This provides:
-- ✅ Balance between efficiency (fewer bridge calls) and flexibility
-- ✅ Logical organization for users
-- ✅ Reusable templates across devices
-- ✅ Clear separation of concerns
+Each metric belongs to one subscription and has:
 
----
+- the exact `metric_name` received from the target;
+- a Cacti field name, normalized to lowercase underscores and limited to 19
+  characters;
+- an RRD type and optional heartbeat/minimum/maximum values; and
+- enabled, data-source, graph, and classification state.
 
-## Core Metric Groups
+Supported RRD types are:
 
-### Group 1: `interface_traffic` (Primary - Phase 2 MVP)
+| Type | Use |
+| --- | --- |
+| `COUNTER` | Monotonically increasing counters such as octets, packets, errors, and discards |
+| `GAUGE` | Point-in-time values such as utilization, temperature, or queue depth |
+| `DERIVE` | Signed rates of change where decreases are meaningful |
+| `ABSOLUTE` | Counts that reset after each read interval |
 
-**Purpose:** Basic interface throughput metrics
-**RRD Type:** COUNTER (cumulative, rate calculated by RRD)
-**Priority:** HIGH - Essential for network monitoring
+Choose the type that matches the target leaf's semantics. The classifier does
+not override the selected RRD type.
 
-**Metrics (4):**
+## Classification rules
 
-| gNMI Path      | Cacti Field Name | Description        | Type    | Units   |
-|----------------|------------------|--------------------|---------|---------|
-| `in-octets`    | `in_octets`      | Inbound bytes      | COUNTER | bytes   |
-| `out-octets`   | `out_octets`     | Outbound bytes     | COUNTER | bytes   |
-| `in-pkts`      | `in_pkts`        | Inbound packets    | COUNTER | packets |
-| `out-pkts`     | `out_pkts`       | Outbound packets   | COUNTER | packets |
+Classification uses the raw metric name when a metric is created or updated.
+Names are normalized to lowercase underscore form before matching.
 
+### Direction
 
-**Cacti Graphs:**
-- Interface Traffic (bits/sec): in_octets × 8, out_octets × 8
-- Interface Packets (pkts/sec): in_pkts, out_pkts
+- `in_` and `rx_` prefixes classify as `inbound`.
+- `out_` and `tx_` prefixes classify as `outbound`.
+- Names without one of those prefixes classify as direction `none` and use the
+  generic graph path.
 
-**Use Cases:**
-- Monitor interface bandwidth utilization
-- Detect traffic spikes
-- Capacity planning
-- Billing/accounting
+### Group and graph key
 
----
+After removing a recognized direction prefix, the classifier applies these
+rules in order:
 
-### Group 2: `interface_errors` (Phase 3)
+| Name contains | Group | Graph key |
+| --- | --- | --- |
+| `discard`, `drop`, `dropped`, or a plural form | `discards` | `integrity_octets` for byte/octet metrics, otherwise `integrity_packets` |
+| `error`, `err`, `crc`, `jabber`, `oversize`, `undersize`, `fragment`, or a plural form | `errors` | `integrity_octets` for byte/octet metrics, otherwise `integrity_packets` |
+| `packet`, `packets`, `pkt`, or `pkts` | `packets` | The normalized name without the direction prefix |
+| `byte`, `bytes`, `octet`, or `octets` | `traffic` | The normalized name without the direction prefix |
+| Anything else | `generic` | No graph key |
 
-**Purpose:** Error and invalid packet counters
-**RRD Type:** COUNTER
-**Priority:** MEDIUM - Important for troubleshooting
+Error and discard matching takes precedence over ordinary packet or octet
+matching. For example, `out-discards-octets` is classified as an outbound
+discard with graph key `integrity_octets`, not ordinary traffic.
 
-**Metrics (6):**
+Examples:
 
-| gNMI Path | Cacti Field Name | Description | Type |
-|-----------|------------------|-------------|------|
-| `in-errors` | `in_errors` | Inbound errors | COUNTER |
-| `out-errors` | `out_errors` | Outbound errors | COUNTER |
-| `in-crc-error-pkts` | `in_crc_error_pkts` | CRC errors | COUNTER |
-| `in-jabber-pkts` | `in_jabber_pkts` | Jabber packets | COUNTER |
-| `in-oversize-pkts` | `in_oversize_pkts` | Oversize packets | COUNTER |
-| `in-undersize-pkts` | `in_undersize_pkts` | Undersize packets | COUNTER |
+| Metric | Group | Direction | Graph key |
+| --- | --- | --- | --- |
+| `in-octets` | `traffic` | `inbound` | `octets` |
+| `tx-bytes` | `traffic` | `outbound` | `bytes` |
+| `rx-unicast-packets` | `packets` | `inbound` | `unicast_packets` |
+| `out-errors` | `errors` | `outbound` | `integrity_packets` |
+| `in-dropped-octets` | `discards` | `inbound` | `integrity_octets` |
+| `temperature` | `generic` | `none` | none |
 
-**Cacti Graphs:**
-- Interface Errors: in_errors, out_errors
-- Invalid Packets: CRC, jabber, oversize, undersize
+## Automatic graph behavior
 
-**Use Cases:**
-- Detect link quality issues
-- Identify faulty cables/optics
-- Troubleshoot packet corruption
+When automatic graph creation is enabled, the plugin first creates one Cacti
+data source per enabled metric.
 
----
+### Traffic and packet pairs
 
-### Group 3: `interface_discards` (Phase 3)
+Traffic and ordinary packet graphs require matching inbound and outbound data
+sources with the same graph key. For example, `in-octets` waits for
+`out-octets`. The first metric remains available as a data source while the
+graph waits; it is not paired with an unrelated metric.
 
-**Purpose:** Dropped and discarded packet tracking
-**RRD Type:** COUNTER
-**Priority:** MEDIUM - Important for congestion monitoring
+Traffic graphs apply the bundled bytes-to-bits CDEF. Packet graphs display the
+counter rate without that conversion.
 
-**Metrics (4):**
+### Integrity graphs
 
-| gNMI Path | Cacti Field Name | Description | Type |
-|-----------|------------------|-------------|------|
-| `in-discards` | `in_discards` | Inbound discards | COUNTER |
-| `in-dropped-pkts` | `in_dropped_pkts` | Inbound drops | COUNTER |
-| `in-discards-octets` | `in_discards_octets` | Discarded bytes | COUNTER |
-| `in-dropped-octets` | `in_dropped_octets` | Dropped bytes | COUNTER |
+Error and discard metrics join an instance-level integrity graph. Packet/event
+metrics use the `integrity_packets` graph, while byte/octet metrics use
+`integrity_octets`. The graph is created when the first eligible data source is
+available, and later matching metrics are attached to it.
 
-**Cacti Graphs:**
-- Interface Discards: Packets and bytes discarded
+### Generic metrics
 
-**Use Cases:**
-- Detect congestion/buffer overflows
-- Monitor QoS drop rates
-- Capacity planning
+A metric that does not match a supported directional family receives a
+single-data-source passthrough graph. This includes GAUGE values such as CPU,
+temperature, or memory utilization as well as vendor-specific names that do not
+match the classifier.
 
----
+Operators can also create or open an individual metric graph manually from the
+subscription metric table.
 
-### Group 4: `interface_multicast` (Phase 3)
+## Runtime storage
 
-**Purpose:** Broadcast, multicast, and unicast traffic breakdown
-**RRD Type:** COUNTER
-**Priority:** LOW - Useful for specific troubleshooting
+Graph classification is database metadata; it does not change the JSON field
+shape written by the daemon. Runtime samples remain keyed first by the
+subscription's unique `instance_identifier`, then by the metric's Cacti field
+name. See [Daemon storage format](daemon_storage_format.md) and the
+[poller bridge API](poller_api.md).
 
-**Metrics (6):**
+## Related documentation
 
-| gNMI Path | Cacti Field Name | Description | Type |
-|-----------|------------------|-------------|------|
-| `in-broadcast-pkts` | `in_broadcast_pkts` | Inbound broadcast | COUNTER |
-| `in-multicast-pkts` | `in_multicast_pkts` | Inbound multicast | COUNTER |
-| `in-unicast-pkts` | `in_unicast_pkts` | Inbound unicast | COUNTER |
-| `out-broadcast-pkts` | `out_broadcast_pkts` | Outbound broadcast | COUNTER |
-| `out-multicast-pkts` | `out_multicast_pkts` | Outbound multicast | COUNTER |
-| `out-unicast-pkts` | `out_unicast_pkts` | Outbound unicast | COUNTER |
-
-**Cacti Graphs:**
-- Traffic Type Distribution: Broadcast/multicast/unicast breakdown
-
-**Use Cases:**
-- Detect broadcast storms
-- Monitor multicast efficiency
-- Analyze traffic patterns
-
----
-
-### Group 5: `interface_distribution` (Phase 4)
-
-**Purpose:** Packet size distribution histograms
-**RRD Type:** COUNTER
-**Priority:** LOW - Advanced troubleshooting
-
-**Metrics (16):**
-
-| gNMI Path | Cacti Field Name | Description |
-|-----------|------------------|-------------|
-| `in-64-octet-pkts` | `in_64_octet_pkts` | 64-byte packets inbound |
-| `in-65-to-127-octet-pkts` | `in_65_to_127_octet_pkts` | 65-127 byte packets |
-| `in-128-to-255-octet-pkts` | `in_128_to_255_octet_pkts` | 128-255 byte packets |
-| `in-256-to-511-octet-pkts` | `in_256_to_511_octet_pkts` | 256-511 byte packets |
-| `in-512-to-1023-octet-pkts` | `in_512_to_1023_octet_pkts` | 512-1023 byte packets |
-| `in-1024-to-1518-octet-pkts` | `in_1024_to_1518_octet_pkts` | 1024-1518 byte packets |
-| `in-1519-to-2047-octet-pkts` | `in_1519_to_2047_octet_pkts` | 1519-2047 byte packets |
-| `in-2048-to-4095-octet-pkts` | `in_2048_to_4095_octet_pkts` | 2048-4095 byte packets |
-| `in-4096-to-9216-octet-pkts` | `in_4096_to_9216_octet_pkts` | 4096-9216 byte packets (jumbo) |
-| `out-1519-to-2047-octet-pkts` | `out_1519_to_2047_octet_pkts` | Outbound 1519-2047 |
-| `out-2048-to-4095-octet-pkts` | `out_2048_to_4095_octet_pkts` | Outbound 2048-4095 |
-| `out-4096-to-9216-octet-pkts` | `out_4096_to_9216_octet_pkts` | Outbound jumbo frames |
-
-**Cacti Graphs:**
-- Packet Size Distribution: Histogram of packet sizes
-
-**Use Cases:**
-- Analyze traffic patterns
-- Detect MTU issues
-- Identify jumbo frame usage
-
----
-
-## Additional Metrics (Informational)
-
-**Not Grouped (Status/Config):**
-
-| gNMI Path | Cacti Field | Type | Notes |
-|-----------|-------------|------|-------|
-| `name` | `interface_name` | STRING | Interface identifier |
-| `link-flap-events` | `link_flap_events` | COUNTER | Link state changes |
-| `last-clear` | `last_clear` | GAUGE | Counter reset timestamp |
-
-**Note:** These may be added to `interface_status` group in Phase 3
-
----
-
-## Field Name Generation Rules
-
-### Transformation Rules
-
-1. **Replace hyphens with underscores:**
-   - `in-octets` → `in_octets`
-   - `in-crc-error-pkts` → `in_crc_error_pkts`
-
-2. **Lowercase all characters:**
-   - Already lowercase in Ciena paths
-
-3. **Remove special characters:**
-   - Keep: alphanumeric, underscore
-   - Remove: brackets, quotes, spaces
-
-4. **Sanitize for Cacti:**
-   - Must start with letter or underscore
-   - Max length: 19 characters (RRD DS name limit)
-   - Unique within data source
-
-### Examples
-
-| Original gNMI Path | After Transformation | Notes |
-|-------------------|----------------------|-------|
-| `in-octets` | `in_octets` | Simple replacement |
-| `in-64-octet-pkts` | `in_64_octet_pkts` | Numbers allowed |
-| `in-1024-to-1518-octet-pkts` | `in_1024_to_1518_octet_pkts` | Complex but valid |
-| `out-broadcast-pkts` | `out_broadcast_pkts` | Standard format |
-
----
-
-## Instance Identifier Extraction
-
-### Strategy
-
-Extract instance identifier from gNMI path prefix to support multiple interfaces.
-
-### Ciena Path Format
-
-**Full Path:**
-```
-Ciena:cn-if:interface-telemetry-state/interface-counters[interface-type=ettp]/interfaces[if-name=40]/counters
-```
-
-**Extraction Logic:**
-1. Find `[interface-type=X]` → interface type: "ettp"
-2. Find `[if-name=Y]` → interface name: "40"
-3. Combine: `ettp-40`
-
-**Code Pattern:**
-```python
-# Extract interface-type
-if 'interface-type=' in path:
-    iface_type = extract_between(path, 'interface-type=', ']')
-else:
-    iface_type = 'unknown'
-
-# Extract if-name
-if 'if-name=' in path:
-    iface_name = extract_between(path, 'if-name=', ']')
-else:
-    iface_name = 'default'
-
-# Combine
-instance_id = f"{iface_type}-{iface_name}"  # "ettp-40"
-```
-
-### OpenConfig Path Format
-
-**Full Path:**
-```
-/interfaces/interface[name=eth0]/state/counters/in-octets
-```
-
-**Extraction Logic:**
-1. Find `/interface[name=X]` → interface name: "eth0"
-2. Instance ID: `eth0`
-
-**Code Pattern:**
-```python
-if '/interface[name=' in path:
-    instance_id = extract_between(path, '[name=', ']')
-else:
-    instance_id = 'default'
-```
-
-### Fallback Strategy
-
-If no instance identifier found in path:
-- Use `"default"` as instance ID
-- Log warning
-- Suitable for system-wide metrics (CPU, memory, etc.)
-
-### User Override (Phase 3)
-
-Database field `instance_override` allows manual specification:
-```sql
-ALTER TABLE plugin_gnmi_device_metrics
-ADD COLUMN instance_override VARCHAR(50) DEFAULT NULL;
-```
-
-If set, use override instead of auto-extracted value.
-
----
-
-## Phase 2 MVP Scope
-
-### Implement for Phase 2:
-- ✅ `interface_traffic` group (4 metrics)
-- ✅ Instance extraction for Ciena paths
-- ✅ Field name generation
-- ✅ Poller bridge script
-- ✅ Manual template creation guide
-
-### Defer to Phase 3:
-- ⏭️ `interface_errors` group
-- ⏭️ `interface_discards` group
-- ⏭️ `interface_multicast` group
-- ⏭️ `interface_distribution` group
-- ⏭️ OpenConfig path support
-- ⏭️ Auto-discovery of interfaces
-- ⏭️ Instance override in database
-
----
-
-## Data Source Type Summary
-
-All 35 Ciena metrics are **COUNTER type** (cumulative counters).
-
-**COUNTER Characteristics:**
-- Values always increase (or wrap at max)
-- RRDtool calculates rate automatically (value/second)
-- Graph shows rate of change, not absolute value
-- Suitable for: octets, packets, errors, discards
-
-**No GAUGE metrics** in current Ciena dataset.
-
-**Future:** System metrics (CPU %, memory %) would be GAUGE type.
-
----
-
-## Metric Group Registry
-
-### Current Groups (Phase 2-4)
-
-| Group Name | Metrics | RRD Type | Phase | Priority |
-|------------|---------|----------|-------|----------|
-| `interface_traffic` | 4 | COUNTER | 2 | HIGH |
-| `interface_errors` | 6 | COUNTER | 3 | MEDIUM |
-| `interface_discards` | 4 | COUNTER | 3 | MEDIUM |
-| `interface_multicast` | 6 | COUNTER | 3 | LOW |
-| `interface_distribution` | 16 | COUNTER | 4 | LOW |
-
-### Future Groups (Phase 4+)
-
-| Group Name | Metrics | RRD Type | Notes |
-|------------|---------|----------|-------|
-| `interface_state` | TBD | GAUGE | Admin/oper status, speed, duplex |
-| `system_cpu` | TBD | GAUGE | CPU utilization |
-| `system_memory` | TBD | GAUGE | Memory usage |
-| `system_temperature` | TBD | GAUGE | Component temperatures |
-
----
-
-## Implementation Notes
-
-### Poller Bridge Grouping Logic
-
-The poller bridge (`gnmi_poller_bridge.py`) reads raw metrics from daemon JSON and groups them on-the-fly:
-
-```python
-METRIC_GROUPS = {
-    'interface_traffic': [
-        'in-octets',
-        'out-octets',
-        'in-pkts',
-        'out-pkts'
-    ],
-    'interface_errors': [
-        'in-errors',
-        'out-errors',
-        'in-crc-error-pkts',
-        'in-jabber-pkts',
-        'in-oversize-pkts',
-        'in-undersize-pkts'
-    ],
-    # ... more groups
-}
-
-def get_group_metrics(raw_metrics, group_name):
-    """Extract metrics belonging to specified group."""
-    group_paths = METRIC_GROUPS.get(group_name, [])
-    return {path: value for path, value in raw_metrics.items() if path in group_paths}
-```
-
-### Why Bridge Does Grouping (Not Daemon)
-
-**Advantages:**
-- ✅ Daemon stays simple (just collects and stores raw data)
-- ✅ Can change grouping without restarting daemons
-- ✅ Easy to add new groups
-- ✅ Testing easier (daemon unchanged)
-
-**Tradeoffs:**
-- ⚠️ Bridge does extra work per call
-- ⚠️ Grouping logic in Python, not database
-
----
-
-## Vendor-Specific Considerations
-
-### Ciena Paths
-
-**Namespace:** `Ciena:cn-if:interface-telemetry-state`
-
-**Path Structure:**
-```
-Ciena:cn-if:interface-telemetry-state/interface-counters[interface-type=ettp]/interfaces[if-name=40]/counters
-```
-
-**Characteristics:**
-- Proprietary Ciena namespace
-- Complex filtering syntax
-- Interface type + name tuple identifies instance
-
-### OpenConfig Paths (Future)
-
-**Namespace:** `/interfaces/interface[name=X]/state/counters`
-
-**Path Structure:**
-```
-/interfaces/interface[name=eth0]/state/counters/in-octets
-```
-
-**Characteristics:**
-- Standard OpenConfig model
-- Simpler path structure
-- Interface name in brackets
-
-**Phase 3:** Add OpenConfig path support alongside Ciena
-
----
-
-## Testing Data
-
-### Sample Raw Metrics (from Ciena)
-
-```json
-{
-  "in-octets": 1011655537381,
-  "out-octets": 2334094681126,
-  "in-pkts": 1489233864,
-  "out-pkts": 2319763240,
-  "in-errors": 0,
-  "out-errors": 0,
-  "in-discards": 386328,
-  "in-broadcast-pkts": 143,
-  "in-multicast-pkts": 1063161,
-  "in-64-octet-pkts": 288509494,
-  ...
-}
-```
-
-### Grouped Output (interface_traffic)
-
-**Poller Bridge Output:**
-```
-in_octets:1011655537381 out_octets:2334094681126 in_pkts:1489233864 out_pkts:2319763240
-```
-
-**Cacti Parses:**
-- in_octets = 1011655537381
-- out_octets = 2334094681126
-- in_pkts = 1489233864
-- out_pkts = 2319763240
-
-**RRD Stores:**
-- Calculates rate: (current - previous) / 10 seconds
-- Stores: bits/sec, packets/sec
-
----
-
-## Documentation Cross-References
-
-- **Storage Format:** `docs/daemon_storage_format.md`
-- **Architecture:** `docs/architecture.md`
-- **Poller Bridge:** `plugins/gnmi/scripts/gnmi_poller_bridge.py`
-- **Cacti Templates:** `docs/cacti_data_input_methods.md`
-
----
-
-## Future Enhancements (Phase 4)
-
-- [ ] User-defined metric groups via UI
-- [ ] Dynamic group creation
-- [ ] Vendor-specific group presets (Ciena, Arista, Juniper)
-- [ ] Metric filtering (exclude unwanted metrics)
-- [ ] Custom field name mappings
-- [ ] GAUGE metric support (for system resources)
+- [User guide](user_guide.md) — create subscriptions, metrics, data sources, and graphs
+- [Subscription examples](https://github.com/Per-Forma/cacti-gnmi-plugin/tree/main/examples) — OpenConfig and Ciena starting points
+- [Architecture](architecture.md) — daemon, storage, bridge, and Cacti data flow
+- [Poller bridge source](https://github.com/Per-Forma/cacti-gnmi-plugin/blob/main/scripts/gnmi_poller_bridge.py) — runtime metric lookup and output

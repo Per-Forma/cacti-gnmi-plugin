@@ -32,7 +32,7 @@ SNMP/device credentials, but it means:
   form (the daemon hot-reloads on save).
 - Keep database and host backups encrypted and access-controlled.
 
-> This RC does not provide credential encryption or credential-store
+> This public beta does not provide credential encryption or credential-store
 > integration. The controls above are required mitigations.
 
 ---
