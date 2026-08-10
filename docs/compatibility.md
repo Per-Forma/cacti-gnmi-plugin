@@ -15,7 +15,7 @@ zero-residue uninstall.
 
 ## Cacti validation matrix
 
-The same release-candidate code path passed install, enablement, regression,
+The same public-beta code path passed install, enablement, regression,
 poller/UI, disablement, uninstall, and reinstall validation across the
 following releases:
 

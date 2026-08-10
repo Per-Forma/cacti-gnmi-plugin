@@ -160,12 +160,47 @@ function gnmi_show_tab() {
 }
 
 /**
+ * Detect schemas from unsupported private or development builds.
+ *
+ * The public beta supports fresh installs only.  Refuse to install over the
+ * legacy assignment-table layout rather than dropping data or leaving a mixed
+ * schema that current runtime code cannot use.
+ *
+ * @return array Human-readable legacy schema markers; empty when installation
+ *               may proceed.
+ */
+function gnmi_find_unsupported_legacy_schema() {
+	$legacy = array();
+
+	foreach (array('plugin_gnmi_device_metrics', 'plugin_gnmi_device_settings') as $table) {
+		if (db_table_exists($table)) {
+			$legacy[] = $table;
+		}
+	}
+
+	if (db_table_exists('plugin_gnmi_metrics')) {
+		$columns = db_fetch_assoc('DESCRIBE plugin_gnmi_metrics');
+		if (!is_array($columns) || empty($columns)) {
+			$legacy[] = 'plugin_gnmi_metrics (schema could not be inspected)';
+		} else {
+			$column_names = array_column($columns, 'Field');
+			if (!in_array('subscription_id', $column_names, true)) {
+				$legacy[] = 'plugin_gnmi_metrics (missing subscription_id)';
+			}
+		}
+	}
+
+	return $legacy;
+}
+
+/**
  * Install hook - creates database tables for gNMI plugin.
  *
  * Schema Design:
  * - plugin_gnmi_devices: Stores gNMI connection parameters per Cacti device
- * - plugin_gnmi_metrics: Defines reusable metric templates (paths, transforms, RRD config)
- * - plugin_gnmi_device_metrics: Assignment table linking devices to metrics
+ * - plugin_gnmi_subscriptions: Defines subscription paths per device
+ * - plugin_gnmi_metrics: Defines metrics belonging to subscriptions
+ * - plugin_gnmi_events: Records lifecycle and configuration events
  *
  * Security note:
  * Credentials are stored in plaintext. Secure database access, restrict
@@ -175,6 +210,20 @@ function gnmi_show_tab() {
  */
 function plugin_gnmi_install() {
 	global $config;
+
+	$legacy_schema = gnmi_find_unsupported_legacy_schema();
+	if (!empty($legacy_schema)) {
+		cacti_log(
+			'gNMI Plugin: Install blocked because unsupported private/development schema was found: ' .
+			implode(', ', $legacy_schema) .
+			'. The public beta is fresh-install only; existing tables were left unchanged. ' .
+			'Back up and remove the earlier plugin installation before retrying.',
+			false,
+			'INSTALL',
+			POLLER_VERBOSITY_LOW
+		);
+		return false;
+	}
 
 	// Include functions.php for helper functions like gnmi_get_storage_dir()
 	include_once($config['base_path'] . '/plugins/gnmi/include/functions.php');
@@ -255,46 +304,9 @@ function plugin_gnmi_install() {
 		KEY `idx_enabled` (`enabled`),
 		KEY `idx_created_on` (`created_on`),
 		FOREIGN KEY (`host_id`) REFERENCES `host`(`id`) ON DELETE CASCADE
-	) ENGINE=InnoDB COMMENT='Consolidated gNMI device configuration (Phase 2.7 - merged from Phase 2 and Phase 3.1)'");
+	) ENGINE=InnoDB COMMENT='gNMI device connection and daemon configuration'");
 
-	// Table: plugin_gnmi_metrics
-	// Defines reusable metric templates (gNMI paths, transforms, RRD parameters)
-	db_execute("CREATE TABLE IF NOT EXISTS `plugin_gnmi_metrics` (
-		`id` int(11) unsigned NOT NULL AUTO_INCREMENT COMMENT 'Primary key',
-		`name` varchar(255) NOT NULL COMMENT 'Human-readable metric name',
-		`description` text DEFAULT NULL COMMENT 'Detailed description of what this metric measures',
-		`gnmi_path` text NOT NULL COMMENT 'gNMI subscription path (e.g., /interfaces/interface[name=*]/state/counters/in-octets)',
-		`sample_interval` int(11) unsigned NOT NULL DEFAULT 300 COMMENT 'Polling interval in seconds',
-		`transform` varchar(100) DEFAULT 'none' COMMENT 'Transform function: none, octets_to_bits, rate, etc',
-		`rrd_ds_type` varchar(20) NOT NULL DEFAULT 'GAUGE' COMMENT 'RRD data source type: GAUGE, COUNTER, DERIVE, ABSOLUTE',
-		`rrd_heartbeat` int(11) unsigned NOT NULL DEFAULT 600 COMMENT 'RRD heartbeat (seconds)',
-		`rrd_min` varchar(20) DEFAULT '0' COMMENT 'RRD minimum value (U for unknown)',
-		`rrd_max` varchar(20) DEFAULT 'U' COMMENT 'RRD maximum value (U for unknown)',
-		PRIMARY KEY (`id`),
-		UNIQUE KEY `name` (`name`),
-		KEY `sample_interval` (`sample_interval`)
-	) ENGINE=InnoDB COMMENT='gNMI metric template definitions'");
-
-	// Table: plugin_gnmi_device_metrics
-	// Links devices to metrics, tracks RRD file paths
-	db_execute("CREATE TABLE IF NOT EXISTS `plugin_gnmi_device_metrics` (
-		`id` int(11) unsigned NOT NULL AUTO_INCREMENT COMMENT 'Primary key',
-		`device_id` int(11) unsigned NOT NULL COMMENT 'Reference to plugin_gnmi_devices.id',
-		`metric_id` int(11) unsigned NOT NULL COMMENT 'Reference to plugin_gnmi_metrics.id',
-		`enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT 'Enable/disable this metric for this device',
-		`rrd_path` varchar(512) DEFAULT NULL COMMENT 'Path to RRD file for this device-metric pair',
-		`created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When this assignment was created',
-		PRIMARY KEY (`id`),
-		UNIQUE KEY `device_metric` (`device_id`, `metric_id`),
-		KEY `device_id` (`device_id`),
-		KEY `metric_id` (`metric_id`),
-		KEY `enabled` (`enabled`)
-	) ENGINE=InnoDB COMMENT='Device-to-metric assignment table'");
-
-	// Table: plugin_gnmi_device_settings is now consolidated into plugin_gnmi_devices (Phase 2.7)
-	// No longer needed - all fields merged into plugin_gnmi_devices table above
-
-	// Table: plugin_gnmi_events (Phase 3.2)
+	// Table: plugin_gnmi_events
 	// Audit trail for config changes, daemon lifecycle events, errors
 	db_execute("CREATE TABLE IF NOT EXISTS `plugin_gnmi_events` (
 		`id` INT(11) UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT 'Event ID',
@@ -308,8 +320,6 @@ function plugin_gnmi_install() {
 		FOREIGN KEY (`device_id`) REFERENCES `plugin_gnmi_devices`(`id`) ON DELETE CASCADE
 	) ENGINE=InnoDB COMMENT='Audit trail for gNMI daemon lifecycle and configuration events'");
 
-	// Phase 3.3: New subscription management tables
-
 	// Table: plugin_gnmi_subscriptions
 	// Store user-defined gNMI subscription paths per device
 	db_execute("CREATE TABLE IF NOT EXISTS `plugin_gnmi_subscriptions` (
@@ -318,10 +328,11 @@ function plugin_gnmi_install() {
 		`subscription_path` TEXT NOT NULL COMMENT 'gNMI path (e.g., Ciena:cn-if:interface-telemetry-state/...)',
 		`instance_identifier` VARCHAR(100) NOT NULL COMMENT 'Instance name (e.g., ettp-40, eth0, CPU0)',
 		`enabled` BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Enable/disable this subscription',
-		`discovery_mode` ENUM('manual', 'discovered', 'template') NOT NULL DEFAULT 'manual' COMMENT 'Phase 3.3: always manual, Phase 3.4: discovered/template',
+		`discovery_mode` ENUM('manual', 'discovered', 'template') NOT NULL DEFAULT 'manual' COMMENT 'How the subscription definition was created',
 		`auto_create_datasources` BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Auto-create Cacti data sources for metrics',
-		`last_discovery_time` TIMESTAMP NULL DEFAULT NULL COMMENT 'Phase 3.4: when metrics were last discovered',
-		`discovery_status` ENUM('pending', 'success', 'failed') NULL DEFAULT NULL COMMENT 'Phase 3.4: discovery result',
+		`auto_create_graphs` BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Auto-create Cacti graphs for metrics',
+		`last_discovery_time` TIMESTAMP NULL DEFAULT NULL COMMENT 'When metrics were last discovered',
+		`discovery_status` ENUM('pending', 'success', 'failed') NULL DEFAULT NULL COMMENT 'Most recent discovery result',
 		`notes` TEXT NULL COMMENT 'User notes about this subscription',
 		`created_on` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		`modified_on` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -329,55 +340,36 @@ function plugin_gnmi_install() {
 		KEY `idx_enabled` (`enabled`),
 		KEY `idx_discovery_mode` (`discovery_mode`),
 		FOREIGN KEY (`device_id`) REFERENCES `plugin_gnmi_devices`(`id`) ON DELETE CASCADE
-	) ENGINE=InnoDB COMMENT='gNMI subscription definitions per device (Phase 3.3+)'");
+	) ENGINE=InnoDB COMMENT='gNMI subscription definitions per device'");
 
-	// Phase 3.3: Refactor plugin_gnmi_metrics table
-	// Check if old table exists and has data before recreating
-	$old_table_exists = db_table_exists('plugin_gnmi_metrics');
-	$old_metric_count = 0;
-	if ($old_table_exists) {
-		$old_metric_count = db_fetch_cell('SELECT COUNT(*) FROM plugin_gnmi_metrics');
-	}
-
-	if ($old_metric_count > 0) {
-		cacti_log('gNMI: WARNING - plugin_gnmi_metrics has data, skipping recreation for Phase 3.3', false, 'INSTALL');
-		// Don't drop - let admin handle migration manually
-	} else {
-		// Safe to recreate - drop old tables first
-		db_execute('DROP TABLE IF EXISTS plugin_gnmi_device_metrics');
-		db_execute('DROP TABLE IF EXISTS plugin_gnmi_metrics');
-
-		// Create new plugin_gnmi_metrics table
-		db_execute("CREATE TABLE IF NOT EXISTS `plugin_gnmi_metrics` (
-			`id` INT(11) UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-			`subscription_id` INT(11) UNSIGNED NOT NULL COMMENT 'FK to plugin_gnmi_subscriptions.id',
-			`metric_name` VARCHAR(255) NOT NULL COMMENT 'Raw metric name from device (e.g., in-octets)',
-			`cacti_field_name` VARCHAR(19) NOT NULL COMMENT 'Sanitized for Cacti/RRD (e.g., in_octets, max 19 chars)',
-			`rrd_type` ENUM('COUNTER', 'GAUGE', 'DERIVE', 'ABSOLUTE') NOT NULL DEFAULT 'COUNTER',
-			`rrd_heartbeat` INT(5) UNSIGNED NOT NULL DEFAULT 600 COMMENT 'Seconds before data marked stale (SQL default 600 = 2x 300s fallback interval; runtime uses gnmi_get_poller_interval() * 2)',
-			`rrd_min` VARCHAR(20) NOT NULL DEFAULT '0' COMMENT 'Minimum value (U for unlimited)',
-			`rrd_max` VARCHAR(20) NOT NULL DEFAULT 'U' COMMENT 'Maximum value (U for unlimited)',
-			`enabled` BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Enable/disable collection',
-			`discovered` BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Phase 3.3: false (manual), Phase 3.4: true (auto-discovered)',
-			`datasource_created` BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Tracks if Cacti data source exists',
-			`metric_group` ENUM('traffic','packets','errors','discards','generic') NOT NULL DEFAULT 'generic',
-			`metric_direction` ENUM('inbound','outbound','none') NOT NULL DEFAULT 'none',
-			`metric_graph_key` VARCHAR(128) NULL DEFAULT NULL COMMENT 'Deterministic auto-graph grouping key derived from raw metric name',
-			`graph_created` BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Tracks if a Cacti graph exists',
-			`local_data_id` INT(11) UNSIGNED NULL DEFAULT NULL COMMENT 'FK to Cacti data_local.id (NULL until created)',
-			`graph_local_id` INT(11) UNSIGNED NULL DEFAULT NULL COMMENT 'FK to Cacti graph_local.id (NULL until created)',
-			`created_on` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			`modified_on` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-			UNIQUE KEY `uk_subscription_metric` (`subscription_id`, `metric_name`),
-			KEY `idx_enabled` (`enabled`),
-			KEY `idx_datasource_created` (`datasource_created`),
-			KEY `idx_metric_graph_key` (`subscription_id`, `metric_graph_key`, `metric_direction`),
-			KEY `idx_discovered` (`discovered`),
-			FOREIGN KEY (`subscription_id`) REFERENCES `plugin_gnmi_subscriptions`(`id`) ON DELETE CASCADE
-		) ENGINE=InnoDB COMMENT='Individual metrics collected from gNMI subscriptions (Phase 3.3+)'");
-
-		cacti_log('gNMI: Recreated plugin_gnmi_metrics table for Phase 3.3', false, 'INSTALL', POLLER_VERBOSITY_MEDIUM);
-	}
+	// Table: plugin_gnmi_metrics
+	db_execute("CREATE TABLE IF NOT EXISTS `plugin_gnmi_metrics` (
+		`id` INT(11) UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+		`subscription_id` INT(11) UNSIGNED NOT NULL COMMENT 'FK to plugin_gnmi_subscriptions.id',
+		`metric_name` VARCHAR(255) NOT NULL COMMENT 'Raw metric name from device (e.g., in-octets)',
+		`cacti_field_name` VARCHAR(19) NOT NULL COMMENT 'Sanitized for Cacti/RRD (e.g., in_octets, max 19 chars)',
+		`rrd_type` ENUM('COUNTER', 'GAUGE', 'DERIVE', 'ABSOLUTE') NOT NULL DEFAULT 'COUNTER',
+		`rrd_heartbeat` INT(5) UNSIGNED NOT NULL DEFAULT 600 COMMENT 'Seconds before data marked stale (SQL default 600 = 2x 300s fallback interval; runtime uses gnmi_get_poller_interval() * 2)',
+		`rrd_min` VARCHAR(20) NOT NULL DEFAULT '0' COMMENT 'Minimum value (U for unlimited)',
+		`rrd_max` VARCHAR(20) NOT NULL DEFAULT 'U' COMMENT 'Maximum value (U for unlimited)',
+		`enabled` BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Enable/disable collection',
+		`discovered` BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Whether the metric was discovered automatically',
+		`datasource_created` BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Tracks if a Cacti data source exists',
+		`metric_group` ENUM('traffic','packets','errors','discards','generic') NOT NULL DEFAULT 'generic',
+		`metric_direction` ENUM('inbound','outbound','none') NOT NULL DEFAULT 'none',
+		`metric_graph_key` VARCHAR(128) NULL DEFAULT NULL COMMENT 'Deterministic auto-graph grouping key derived from raw metric name',
+		`graph_created` BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Tracks if a Cacti graph exists',
+		`local_data_id` INT(11) UNSIGNED NULL DEFAULT NULL COMMENT 'FK to Cacti data_local.id (NULL until created)',
+		`graph_local_id` INT(11) UNSIGNED NULL DEFAULT NULL COMMENT 'FK to Cacti graph_local.id (NULL until created)',
+		`created_on` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		`modified_on` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY `uk_subscription_metric` (`subscription_id`, `metric_name`),
+		KEY `idx_enabled` (`enabled`),
+		KEY `idx_datasource_created` (`datasource_created`),
+		KEY `idx_metric_graph_key` (`subscription_id`, `metric_graph_key`, `metric_direction`),
+		KEY `idx_discovered` (`discovered`),
+		FOREIGN KEY (`subscription_id`) REFERENCES `plugin_gnmi_subscriptions`(`id`) ON DELETE CASCADE
+	) ENGINE=InnoDB COMMENT='Individual metrics collected from gNMI subscriptions'");
 
 	cacti_log('gNMI Plugin: Database tables created successfully', false, 'INSTALL', POLLER_VERBOSITY_MEDIUM);
 

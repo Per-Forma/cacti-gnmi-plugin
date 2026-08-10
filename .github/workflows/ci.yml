@@ -94,6 +94,9 @@ jobs:
           test "$(awk -F ' *= *' '$1 == "compat" { print $2; exit }' INFO)" = "1.2.25+"
           test "$(awk -F ' *= *' '$1 == "license" { print $2; exit }' INFO)" = "GPL-2.0-or-later"
 
+      - name: Validate public documentation
+        run: python -m unittest tests.test_public_docs
+
       - name: Smoke-test prerelease packaging
         run: deployment/package_release.sh --allow-dirty 1.0.0-beta.1
 
@@ -107,6 +110,16 @@ jobs:
             cd "$(dirname "$tarball")"
             shasum -a 256 -c "$(basename "$tarball").sha256"
           )
+          extract_dir="$RUNNER_TEMP/gnmi-package"
+          mkdir -p "$extract_dir"
+          tar xzf "$tarball" -C "$extract_dir"
+          package_root=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d -print -quit)
+          test -n "$package_root"
+          (
+            cd "$package_root"
+            shasum -a 256 -c CHECKSUMS.txt
+          )
+          python -m tests.public_docs_validator "$extract_dir" --source-docs docs
 
   php-harness:
     name: Cacti 1.2.31 PHP harnesses
@@ -156,7 +169,7 @@ jobs:
           docker logs gnmi_cacti_ci
           exit 1
 
-      - name: Deploy and enable plugin
+      - name: Deploy plugin and test files
         shell: bash
         run: |
           ./deploy_plugin.sh gnmi_cacti_ci:/var/www/html/cacti/plugins/gnmi/
@@ -164,6 +177,14 @@ jobs:
             gnmi_cacti_ci:/var/www/html/cacti/plugins/gnmi/tests/
           docker exec -u root gnmi_cacti_ci \
             chown -R www-data:www-data /var/www/html/cacti/plugins/gnmi
+
+      - name: Verify real legacy-schema preflight
+        run: |
+          docker exec -u www-data gnmi_cacti_ci \
+            php /var/www/html/cacti/plugins/gnmi/tests/integration/cacti_compat/test_legacy_schema_guard_real.php
+
+      - name: Install and enable plugin
+        run: |
           docker exec -u www-data gnmi_cacti_ci \
             php /var/www/html/cacti/cli/plugin_manage.php \
             --plugin=gnmi --install --allperms
