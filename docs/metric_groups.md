@@ -70,8 +70,8 @@ rules in order:
 
 | Name contains | Group | Graph key |
 | --- | --- | --- |
-| `discard`, `drop`, `dropped`, or a plural form | `discards` | `integrity_octets` for byte/octet metrics, otherwise `integrity_packets` |
-| `error`, `err`, `crc`, `jabber`, `oversize`, `undersize`, `fragment`, or a plural form | `errors` | `integrity_octets` for byte/octet metrics, otherwise `integrity_packets` |
+| `discard`, `discards`, `drop`, `drops`, or `dropped` | `discards` | `integrity_octets` for byte/octet metrics, otherwise `integrity_packets` |
+| `error`, `errors`, `err`, `errs`, `crc`, `jabber`, `oversize`, `undersize`, or `fragment` | `errors` | `integrity_octets` for byte/octet metrics, otherwise `integrity_packets` |
 | `packet`, `packets`, `pkt`, or `pkts` | `packets` | The normalized name without the direction prefix |
 | `byte`, `bytes`, `octet`, or `octets` | `traffic` | The normalized name without the direction prefix |
 | Anything else | `generic` | No graph key |

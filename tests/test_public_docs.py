@@ -108,6 +108,16 @@ class PublicDocumentationTests(unittest.TestCase):
         )
         self.assertNotIn("created or updated", guide)
         self.assertIn("does not rewrite its stored classification metadata", guide)
+        self.assertIn(
+            "`discard`, `discards`, `drop`, `drops`, or `dropped`",
+            guide,
+        )
+        self.assertIn(
+            "`error`, `errors`, `err`, `errs`, `crc`, `jabber`, `oversize`, "
+            "`undersize`, or `fragment`",
+            guide,
+        )
+        self.assertNotIn("or a plural form", guide)
 
     def test_data_flow_docs_name_the_direct_rrd_writer(self) -> None:
         schema = (ROOT / "docs/database_schema.md").read_text(encoding="utf-8")

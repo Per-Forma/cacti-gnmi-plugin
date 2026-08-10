@@ -97,7 +97,8 @@ function test_current_schema_columns() {
 		$rows = db_fetch_assoc("SELECT column_name AS column_name_value
 			FROM information_schema.columns
 			WHERE table_schema = DATABASE()
-			AND table_name = '$table'");
+			AND table_name = '$table'
+			ORDER BY ordinal_position");
 		$actual = array_map(function ($row) {
 			return $row['column_name_value'];
 		}, $rows);
