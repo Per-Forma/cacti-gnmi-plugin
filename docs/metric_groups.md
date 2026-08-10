@@ -46,8 +46,15 @@ not override the selected RRD type.
 
 ## Classification rules
 
-Classification uses the raw metric name when a metric is created or updated.
-Names are normalized to lowercase underscore form before matching.
+Classification metadata is stored from the raw metric name when a metric is
+created. When graph creation is attempted, the plugin classifies the current
+raw name again in memory before choosing a graph path. Names are normalized to
+lowercase underscore form before matching.
+
+Renaming a metric does not rewrite its stored classification metadata or
+remove and rebuild an existing graph association. If a renamed metric must
+belong to a different established graph family, remove and recreate the
+affected metric and graph instead of relying on the edit to regroup them.
 
 ### Direction
 

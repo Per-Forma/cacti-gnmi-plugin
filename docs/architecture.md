@@ -16,7 +16,11 @@ runtime storage
     |
     | poller bridge
     v
-Cacti data sources and RRD files
+PHP poller hook
+    |
+    | rrdtool update
+    v
+Cacti-managed RRD files
     |
     v
 graphs and status dashboard
@@ -44,8 +48,11 @@ runtime state atomically. Daemon control is provided by
 ### Poller bridge
 
 `scripts/gnmi_poller_bridge.py` reads the decoupled runtime data and emits the
-values expected by Cacti data sources. Metric definitions come from the Cacti
-database rather than being hardcoded into the bridge.
+timestamped values expected by Cacti data sources. Metric definitions come from
+the Cacti database rather than being hardcoded into the bridge. The PHP poller
+hook validates that output and writes it directly to Cacti-managed RRD files
+with `rrdtool update`; Cacti owns the data-source and graph metadata and renders
+the graphs.
 
 ### Runtime storage
 
@@ -70,7 +77,8 @@ for the threat model and deployment guidance.
 3. Subscription and metric definitions are created for the device.
 4. The poller lifecycle hook creates or updates the daemon configuration.
 5. Configuration changes trigger a controlled daemon restart.
-6. Samples flow through runtime storage into Cacti-managed RRD files.
+6. The bridge selects timestamped samples from runtime storage, and the PHP
+   poller hook writes them to Cacti-managed RRD files with `rrdtool update`.
 
 ## Compatibility behavior
 

@@ -3,50 +3,23 @@
 from __future__ import annotations
 
 import re
-import subprocess
+import tempfile
 import unittest
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+
+from tests.public_docs_validator import (
+    tracked_markdown_files,
+    validate_markdown_links,
+    validate_packaged_doc_sets,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
-
-def tracked_markdown_files() -> list[Path]:
-    result = subprocess.run(
-        ["git", "ls-files", "*.md"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return [ROOT / line for line in result.stdout.splitlines() if line]
-
-
 class PublicDocumentationTests(unittest.TestCase):
     def test_relative_markdown_links_resolve(self) -> None:
-        link_pattern = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
-        missing: list[str] = []
-
-        for document in tracked_markdown_files():
-            text = document.read_text(encoding="utf-8")
-            for raw_target in link_pattern.findall(text):
-                target = raw_target.strip().strip("<>")
-                if not target:
-                    continue
-                parsed = urlsplit(target)
-                if parsed.scheme or target.startswith(("#", "//")):
-                    continue
-                path_text = unquote(parsed.path)
-                if not path_text:
-                    continue
-                resolved = (document.parent / path_text).resolve()
-                if not resolved.exists():
-                    missing.append(
-                        f"{document.relative_to(ROOT)} -> {target}"
-                    )
-
-        self.assertEqual([], missing, "Broken local Markdown links:\n" + "\n".join(missing))
+        issues = validate_markdown_links(ROOT, tracked_markdown_files(ROOT))
+        self.assertEqual([], issues, "Broken local Markdown links:\n" + "\n".join(issues))
 
     def test_operator_terms_match_current_prerelease_channel(self) -> None:
         info = (ROOT / "INFO").read_text(encoding="utf-8")
@@ -55,9 +28,13 @@ class PublicDocumentationTests(unittest.TestCase):
         version = version_match.group(1)
 
         operator_files = [
-            ROOT / "docs/install.md",
-            ROOT / "docs/security.md",
+            ROOT / "README.md",
+            ROOT / "BETA.md",
+            ROOT / "SECURITY.md",
+            ROOT / "SUPPORT.md",
             ROOT / "scripts/DAEMON_README.md",
+            ROOT / "releases" / f"{version}.md",
+            *sorted((ROOT / "docs").glob("*.md")),
         ]
         combined = "\n".join(path.read_text(encoding="utf-8") for path in operator_files)
 
@@ -129,13 +106,73 @@ class PublicDocumentationTests(unittest.TestCase):
             "[Poller bridge source](https://github.com/Per-Forma/cacti-gnmi-plugin/blob/main/scripts/gnmi_poller_bridge.py)",
             guide,
         )
+        self.assertNotIn("created or updated", guide)
+        self.assertIn("does not rewrite its stored classification metadata", guide)
 
-    def test_release_package_copies_complete_documentation_set(self) -> None:
-        package_script = (ROOT / "deployment/package_beta.sh").read_text(encoding="utf-8")
-        self.assertIn('cp "$SOURCE_ROOT"/docs/*.md "$PACKAGE_DIR/docs/"', package_script)
-        self.assertIn('cp "$SOURCE_ROOT"/docs/*.md "$PACKAGE_DIR/gnmi/docs/"', package_script)
-        self.assertIn('cp "$SOURCE_ROOT/SECURITY.md" "$PACKAGE_DIR/gnmi/"', package_script)
-        self.assertIn('cp "$SOURCE_ROOT/CONTRIBUTING.md" "$PACKAGE_DIR/gnmi/"', package_script)
+    def test_data_flow_docs_name_the_direct_rrd_writer(self) -> None:
+        schema = (ROOT / "docs/database_schema.md").read_text(encoding="utf-8")
+        architecture = (ROOT / "docs/architecture.md").read_text(encoding="utf-8")
+        for document in (schema, architecture):
+            self.assertIn("`rrdtool update`", document)
+        self.assertNotIn("Cacti updates its managed RRD files", schema)
+
+    def test_markdown_validator_covers_packaged_link_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "images").mkdir()
+            (root / "images" / "status.png").write_bytes(b"png")
+            (root / "target.md").write_text(
+                "# Existing heading\n\n## Repeated\n\n## Repeated\n",
+                encoding="utf-8",
+            )
+            valid = root / "valid.md"
+            valid.write_text(
+                "[inline](target.md#existing-heading)\n"
+                "![image](images/status.png)\n"
+                "[reference][target]\n"
+                "[duplicate](target.md#repeated-1)\n\n"
+                "[target]: target.md#repeated\n\n"
+                "```md\n[ignored](missing.md)\n```\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([], validate_markdown_links(root, [valid, root / "target.md"]))
+
+            invalid = root / "invalid.md"
+            invalid.write_text(
+                "[missing](missing.md)\n"
+                "![missing image](images/missing.png)\n"
+                "[missing anchor](target.md#absent)\n"
+                "[missing reference][unknown]\n",
+                encoding="utf-8",
+            )
+            issues = validate_markdown_links(root, [invalid, root / "target.md"])
+            self.assertTrue(any("missing.md" in issue for issue in issues))
+            self.assertTrue(any("images/missing.png" in issue for issue in issues))
+            self.assertTrue(any("missing anchor" in issue for issue in issues))
+            self.assertTrue(any("missing reference definition" in issue for issue in issues))
+
+    def test_packaged_document_sets_must_match_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_docs = root / "source"
+            package = root / "extract" / "package"
+            source_docs.mkdir()
+            (package / "docs").mkdir(parents=True)
+            (package / "gnmi" / "docs").mkdir(parents=True)
+            for name in ("install.md", "security.md"):
+                (source_docs / name).write_text(f"# {name}\n", encoding="utf-8")
+                (package / "docs" / name).write_text(f"# {name}\n", encoding="utf-8")
+                (package / "gnmi" / "docs" / name).write_text(f"# {name}\n", encoding="utf-8")
+            (package / "gnmi" / "SECURITY.md").write_text("# Security\n", encoding="utf-8")
+            (package / "gnmi" / "CONTRIBUTING.md").write_text("# Contributing\n", encoding="utf-8")
+
+            self.assertEqual(
+                [],
+                validate_packaged_doc_sets(root / "extract", source_docs),
+            )
+            (package / "gnmi" / "docs" / "security.md").unlink()
+            issues = validate_packaged_doc_sets(root / "extract", source_docs)
+            self.assertTrue(any("security.md" in issue for issue in issues))
 
 
 if __name__ == "__main__":

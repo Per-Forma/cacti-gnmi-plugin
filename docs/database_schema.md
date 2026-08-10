@@ -162,9 +162,12 @@ hours and consolidate longer daily, weekly, and monthly windows.
    tables.
 3. The poller lifecycle hook renders daemon configuration from those rows.
 4. The per-device daemon streams gNMI data into protected JSON runtime storage.
-5. The poller bridge resolves expected metrics from the database and emits the
-   selected instance values to Cacti.
-6. Cacti updates its managed RRD files and renders graphs. Lifecycle and error
+5. The PHP poller hook invokes the poller bridge for each Cacti data source. The
+   bridge resolves expected metrics from the database and emits timestamped
+   values from runtime storage.
+6. The PHP poller hook validates the bridge output, prepares the Cacti-managed
+   RRD file, and writes samples with `rrdtool update`. Cacti owns the data-source
+   and graph metadata and renders the resulting graphs. Lifecycle and error
    activity is recorded in `plugin_gnmi_events`.
 
 For the complete runtime path, see [Architecture](architecture.md) and the

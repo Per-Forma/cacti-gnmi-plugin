@@ -10,7 +10,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Aligned the fresh-install schema, database reference, metric-classification
-  guide, and operator documentation with the current public beta.
+  guide, and operator documentation with the current public beta, and added
+  artifact-level documentation and schema-lifecycle regression coverage.
 - Replaced references to nonexistent operator helper scripts with the supported
   dashboard restart action and diagnostic-tool workflow.
 
