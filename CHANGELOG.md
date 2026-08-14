@@ -7,6 +7,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2026-08-13
+
+### Added
+
+- Added a vendor-neutral, per-device TLS cipher policy with an explicit Legacy
+  TLS compatibility option for gNMI targets that cannot negotiate gRPC's
+  secure cipher defaults.
+- Added connection-test diagnostics and dashboard visibility for the selected
+  TLS cipher policy.
+
 ### Fixed
 
 - Aligned the fresh-install schema, database reference, metric-classification
@@ -26,5 +36,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Explicit Ciena SAOS 10 compatibility mode.
 - Automated Python, PHP, lifecycle, and integration test suites.
 
-[Unreleased]: https://github.com/Per-Forma/cacti-gnmi-plugin/compare/v1.0.0-beta.1...HEAD
+[Unreleased]: https://github.com/Per-Forma/cacti-gnmi-plugin/compare/v1.0.0-beta.2...HEAD
+[1.0.0-beta.2]: https://github.com/Per-Forma/cacti-gnmi-plugin/compare/v1.0.0-beta.1...v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/Per-Forma/cacti-gnmi-plugin/releases/tag/v1.0.0-beta.1

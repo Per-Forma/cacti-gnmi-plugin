@@ -1,6 +1,6 @@
 [info]
 name = gnmi
-version = 1.0.0-beta.1
+version = 1.0.0-beta.2
 longname = gNMI Telemetry Collection for Cacti
 author = Jarred Masterson
 email = jarred.masterson@gmail.com

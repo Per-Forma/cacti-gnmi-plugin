@@ -89,6 +89,7 @@ defined by this test plan.
 | 5.6 | **Invalid config input** | Submit empty hostname, port out of 1–65535, interval out of 5–300, or a path with no `/` | Server-side validation rejects with a user-visible message; nothing persisted; no daemon started for invalid data |
 | 5.7 | **Counter reset / wrap** | Clear counters on the device (or observe a 32-bit wrap) | COUNTER DS handles wrap; no sustained NaN spike on the graph after the fix for instance-keyed buffering |
 | 5.8 | **Certificate mismatch (TLS)** | Use a CA/`tls_override` that doesn't match the device cert | TLS handshake failure logged clearly; device flagged; resolves when cert/override corrected (`skip_verify` only as a lab workaround) |
+| 5.9 | **Legacy TLS cipher target** | Use a target that rejects gRPC defaults but accepts `ECDHE-RSA-AES128-SHA` | Default policy fails clearly; explicit Legacy TLS compatibility restarts only that daemon and connects; dashboard shows a warning badge |
 
 ---
 

@@ -66,6 +66,8 @@ def test_load_config_rejects_invalid_json_and_shapes(config):
         daemon.load_config(json.dumps(dict(config, subscriptions=[sub])))
     with pytest.raises(ValueError, match="Invalid compatibility_mode"):
         daemon.load_config(json.dumps(dict(config, compatibility_mode="unknown")))
+    with pytest.raises(ValueError, match="Invalid tls_cipher_policy"):
+        daemon.load_config(json.dumps(dict(config, tls_cipher_policy="unknown")))
     assert daemon.load_config(json.dumps(config)) == config
 
 
@@ -319,6 +321,27 @@ def test_connect_and_subscribe_routes_updates_and_optional_tls(instance, monkeyp
     assert poll.called
     assert client.closed is True
     assert instance.gnmi_client is None
+
+
+def test_direct_daemon_initialization_applies_process_scoped_tls_policy(monkeypatch):
+    monkeypatch.setattr(daemon, "gNMIclient", object())
+    monkeypatch.setenv("GRPC_SSL_CIPHER_SUITES", "inherited-global-override")
+
+    policy = daemon.initialize_gnmi_runtime({
+        "use_tls": True,
+        "tls_cipher_policy": "legacy_compatibility",
+    })
+
+    assert policy == "legacy_compatibility"
+    assert os.environ["GRPC_SSL_CIPHER_SUITES"] == (
+        "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA"
+    )
+
+    daemon.initialize_gnmi_runtime({
+        "use_tls": True,
+        "tls_cipher_policy": "default",
+    })
+    assert "GRPC_SSL_CIPHER_SUITES" not in os.environ
 
 
 def test_connect_derives_insecure_and_scopes_ciena_patch(instance, monkeypatch):

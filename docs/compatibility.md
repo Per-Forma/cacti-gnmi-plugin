@@ -59,3 +59,12 @@ target. In that mode, the plugin applies
 Standard mode retains the native pygnmi capability discovery and subscription
 handling. The compatibility mode does not change TLS, certificate verification,
 or authentication settings.
+
+### TLS cipher compatibility
+
+TLS cipher policy is vendor-neutral and separate from the Ciena protocol shim.
+The default policy retains gRPC's secure cipher defaults. An administrator may
+explicitly select `legacy_compatibility` for a target that only negotiates the
+older `ECDHE-RSA-AES128-SHA` TLS 1.2 suite. That selection is scoped to the
+target's daemon process and does not disable certificate verification or mTLS.
+Device-side support for modern AEAD ciphers remains preferred.

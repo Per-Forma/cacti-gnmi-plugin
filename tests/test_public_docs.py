@@ -64,6 +64,7 @@ class PublicDocumentationTests(unittest.TestCase):
         required_columns = [
             "hostname_source",
             "compatibility_mode",
+            "tls_cipher_policy",
             "auto_create_graphs",
             "subscription_id",
             "metric_group",

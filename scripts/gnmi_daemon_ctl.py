@@ -38,6 +38,7 @@ from gnmi_runtime import (
     log_dir as default_log_dir,
     storage_dir as default_storage_dir,
 )
+from gnmi_tls import apply_tls_cipher_policy
 from gnmi_daemon import GNMIDaemon
 
 
@@ -192,6 +193,29 @@ class DaemonController:
             print(f"Error: No configuration provided for device {device_id}", file=sys.stderr)
             return False
 
+        launch_config = config
+        if launch_config is None:
+            try:
+                with open(config_file, 'r') as f:
+                    launch_config = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                print(f"Error reading daemon configuration: {e}", file=sys.stderr)
+                return False
+
+        child_env = os.environ.copy()
+        try:
+            tls_policy = apply_tls_cipher_policy(
+                child_env,
+                launch_config.get('tls_cipher_policy', 'default'),
+                use_tls=bool(launch_config.get(
+                    'use_tls',
+                    not launch_config.get('insecure', False),
+                )),
+            )
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return False
+
         # Build daemon command
         cmd = [
             sys.executable,  # Use same Python interpreter
@@ -213,6 +237,7 @@ class DaemonController:
                     cmd,
                     stdout=log,
                     stderr=subprocess.STDOUT,
+                    env=child_env,
                     start_new_session=True  # Detach from parent
                 )
 
@@ -222,7 +247,10 @@ class DaemonController:
             # Verify it's running
             if self.is_running(device_id):
                 pid = self.read_pid(device_id)
-                print(f"Daemon started for device {device_id} (PID: {pid})")
+                print(
+                    f"Daemon started for device {device_id} "
+                    f"(PID: {pid}, TLS cipher policy: {tls_policy})"
+                )
                 return True
             else:
                 print(f"Error: Daemon failed to start for device {device_id}", file=sys.stderr)

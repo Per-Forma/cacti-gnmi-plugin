@@ -86,6 +86,13 @@ Standard mode uses native gNMI Capabilities and `JSON_IETF`. The opt-in Ciena
 SAOS 10 mode applies a narrowly scoped pygnmi compatibility shim and uses the
 encoding behavior required by the validated target.
 
+TLS cipher policy is vendor-neutral and independent of protocol compatibility.
+Each device daemon receives its own process environment: the default policy
+uses gRPC's cipher defaults, while explicit legacy compatibility adds the
+tested older TLS 1.2 cipher without changing certificate verification or mTLS.
+The poller bridge does not establish gNMI connections and therefore does not
+apply transport policy.
+
 ## Concurrency and failure isolation
 
 - Atomic file replacement prevents the bridge from reading partial snapshots.

@@ -11,13 +11,15 @@ Stages:
   3. gNMI — Subscribe probe on /system/state; any gRPC response = connectivity confirmed
 """
 
-import json, socket, sys, time
+import json, os, signal, socket, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))  # mirrors gnmi_daemon.py line 38
 
 import logging
 logging.basicConfig(level=logging.WARNING)  # suppress pygnmi INFO chatter on stderr
+
+from gnmi_tls import apply_tls_cipher_policy, tls_cipher_policy_label
 
 
 def emit(stage: str, success: bool, message: str, duration_ms: int) -> None:
@@ -49,6 +51,16 @@ def stage_tcp(hostname: str, port: int) -> bool:
 
 def stage_tls(config: dict):
     """Returns open gNMIclient on success, None on failure."""
+    try:
+        tls_cipher_policy = apply_tls_cipher_policy(
+            os.environ,
+            config.get('tls_cipher_policy', 'default'),
+            use_tls=config.get('use_tls', True),
+        )
+    except ValueError as e:
+        emit('tls', False, str(e), 0)
+        return None
+
     if config.get('compatibility_mode', 'standard') == 'ciena_saos10':
         from gnmi_collector.pygnmi_patch import patch_pygnmi_for_ciena
         patch_pygnmi_for_ciena()
@@ -68,14 +80,35 @@ def stage_tls(config: dict):
     if config.get('tls_override'):     kwargs['override']  = config['tls_override']
 
     t0 = time.monotonic()
+
+    def _connect_alarm(signum, frame):
+        raise TimeoutError()
+
+    previous_alarm = signal.signal(signal.SIGALRM, _connect_alarm)
+    signal.alarm(12)
     try:
         gc = gNMIclient(**kwargs)
         gc.connect()
+        signal.alarm(0)
         ms = int((time.monotonic() - t0) * 1000)
         transport = 'TLS handshake' if config.get('use_tls', True) else 'Insecure gNMI transport'
-        emit('tls', True, f'{transport} OK ({ms}ms)', ms)
+        policy_label = tls_cipher_policy_label(tls_cipher_policy)
+        emit('tls', True, f'{transport} OK using {policy_label} ({ms}ms)', ms)
         return gc
+    except TimeoutError:
+        signal.alarm(0)
+        ms = int((time.monotonic() - t0) * 1000)
+        emit(
+            'tls',
+            False,
+            'TLS/gNMI setup timed out after 12s — TCP is reachable, but the '
+            'gRPC channel or Capabilities RPC did not complete. Check TLS cipher '
+            'policy and protocol compatibility mode.',
+            ms,
+        )
+        return None
     except Exception as e:
+        signal.alarm(0)
         ms = int((time.monotonic() - t0) * 1000)
         err = str(e)
         if 'UNAUTHENTICATED' in err or 'code: 16' in err:
@@ -85,9 +118,23 @@ def stage_tls(config: dict):
             'handshake' in err.lower() or 'UNAVAILABLE' in err
         ):
             emit('tls', False, 'TLS certificate validation failed — check CA cert path and TLS hostname override', ms)
+        elif config.get('use_tls', True) and (
+            not err or type(e).__name__ == 'FutureTimeoutError'
+        ):
+            emit(
+                'tls',
+                False,
+                'Secure gRPC TLS negotiation failed. Check certificates and server '
+                'name; if the target only offers older TLS 1.2 ciphers, select '
+                'Legacy TLS compatibility and retest.',
+                ms,
+            )
         else:
             emit('tls', False, f'TLS connection failed: {err[:200]}', ms)
         return None
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous_alarm)
 
 
 # ─── Stage 3: gNMI probe ──────────────────────────────────────────────────────
@@ -114,8 +161,6 @@ def stage_gnmi(gc) -> bool:
         'encoding': 'json',
     }
     t0 = time.monotonic()
-
-    import signal
 
     def _alarm(signum, frame):
         raise TimeoutError()
