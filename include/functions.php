@@ -148,6 +148,31 @@ function gnmi_current_user_can_manage($realm_file = 'ajax_handler.php') {
 }
 
 /**
+ * Check a plugin-specific management realm without falling back to host.php.
+ *
+ * Mutation endpoints use this stricter guard so possessing general device
+ * access cannot substitute for the explicitly assigned gNMI realm.
+ *
+ * @param string $realm_file Plugin realm filename
+ * @return bool True if logged in and assigned the plugin realm
+ */
+function gnmi_current_user_has_plugin_realm($realm_file) {
+	if (PHP_SAPI === 'cli') {
+		return true;
+	}
+
+	if (!isset($_SESSION['sess_user_id']) || (int)$_SESSION['sess_user_id'] === 0) {
+		return false;
+	}
+
+	if (!function_exists('api_plugin_user_realm_auth')) {
+		return false;
+	}
+
+	return (bool)api_plugin_user_realm_auth($realm_file);
+}
+
+/**
  * Get the gNMI runtime root.
  *
  * Defaults to <cacti>/plugins/gnmi/runtime and can be overridden with the

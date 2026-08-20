@@ -23,7 +23,7 @@ fi
 VERSION="${1:-}"
 if [ -z "$VERSION" ] || [ "$#" -ne 1 ]; then
 	echo "Usage: $0 [--allow-dirty] <version>" >&2
-	echo "Example: $0 1.0.0-beta.2" >&2
+	echo "Example: $0 1.0.0-beta.3" >&2
 	exit 2
 fi
 
@@ -145,6 +145,7 @@ fi
 
 for required_file in \
 	"LICENSE" "gnmi/LICENSE" "gnmi/INFO" "gnmi/setup.php" \
+	"gnmi/ajax_handler.php" "gnmi/include/subscription_actions.php" \
 	"gnmi/scripts/requirements.txt" "gnmi/scripts/gnmi_tls.py" "RELEASE_NOTES.md"; do
 	if [ ! -f "$PACKAGE_DIR/$required_file" ]; then
 		echo "ERROR: required package file is missing: $required_file" >&2

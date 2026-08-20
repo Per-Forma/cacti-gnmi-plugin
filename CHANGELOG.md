@@ -7,6 +7,22 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.3] - 2026-08-20
+
+### Added
+
+- Added an explicit per-subscription option for automatically creating missing
+  Cacti data sources for enabled metrics.
+
+### Fixed
+
+- Restored subscription, metric, data-source, graph, and daemon-restart AJAX
+  management through a tracked, device-authorized action service.
+- Ensured management failures return structured JSON instead of allowing a
+  missing include or unexpected exception to disable the plugin.
+- Added deployment, release-package, and Cacti integration checks for the AJAX
+  runtime dependency contract.
+
 ## [1.0.0-beta.2] - 2026-08-13
 
 ### Added
@@ -36,6 +52,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Explicit Ciena SAOS 10 compatibility mode.
 - Automated Python, PHP, lifecycle, and integration test suites.
 
-[Unreleased]: https://github.com/Per-Forma/cacti-gnmi-plugin/compare/v1.0.0-beta.2...HEAD
+[Unreleased]: https://github.com/Per-Forma/cacti-gnmi-plugin/compare/v1.0.0-beta.3...HEAD
+[1.0.0-beta.3]: https://github.com/Per-Forma/cacti-gnmi-plugin/compare/v1.0.0-beta.2...v1.0.0-beta.3
 [1.0.0-beta.2]: https://github.com/Per-Forma/cacti-gnmi-plugin/compare/v1.0.0-beta.1...v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/Per-Forma/cacti-gnmi-plugin/releases/tag/v1.0.0-beta.1

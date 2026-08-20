@@ -1073,27 +1073,16 @@ function gnmi_render_device_form_section($host_id, $gnmi_settings = [], $metric_
 
 	function gnmi_restart_daemon(host_id) {
 		if (confirm('Restart the gNMI daemon for this device? Active connections will be briefly interrupted.')) {
-			var formData = new FormData();
-			formData.append('action', 'restart_daemon');
-			formData.append('host_id', host_id);
+			if (typeof gnmi_ajax_request !== 'function') {
+				alert('The gNMI management interface is not available. Save the device configuration and reload the page.');
+				return;
+			}
 
-			var csrfToken = document.querySelector('input[name="__csrf_magic"]');
-			if (csrfToken) formData.append('__csrf_magic', csrfToken.value);
-
-			fetch('plugins/gnmi/ajax_handler.php', {
-				method: 'POST',
-				body: formData,
-				credentials: 'include'
+			gnmi_ajax_request('restart_daemon', {})
+			.then(function() {
+				alert('Daemon restart initiated successfully.');
 			})
-			.then(response => response.json())
-			.then(data => {
-				if (data.success) {
-					alert('Daemon restart initiated successfully.');
-				} else {
-					alert('Failed to restart daemon: ' + (data.message || 'Unknown error'));
-				}
-			})
-			.catch(error => {
+			.catch(function(error) {
 				console.error('gNMI: restart daemon error:', error);
 				alert('Error restarting daemon: ' + error.message);
 			});

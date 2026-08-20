@@ -125,7 +125,7 @@ function gnmi_get_device_subscriptions($device_id, $enabled_only = false) {
  * Update subscription fields
  *
  * @param int $subscription_id Subscription ID
- * @param array $fields Fields to update (subscription_path, instance_identifier, enabled, notes)
+ * @param array $fields Fields to update (subscription_path, instance_identifier, enabled, notes, auto_create_datasources)
  * @return bool Success status
  */
 function gnmi_update_subscription($subscription_id, $fields) {
@@ -176,6 +176,11 @@ function gnmi_update_subscription($subscription_id, $fields) {
     if (isset($fields['notes'])) {
         $update_fields[] = 'notes = ?';
         $params[] = html_escape($fields['notes']);
+    }
+
+    if (isset($fields['auto_create_datasources'])) {
+        $update_fields[] = 'auto_create_datasources = ?';
+        $params[] = (bool)$fields['auto_create_datasources'];
     }
 
     if (empty($update_fields)) {

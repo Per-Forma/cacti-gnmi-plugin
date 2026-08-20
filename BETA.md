@@ -1,6 +1,6 @@
 # Public beta
 
-Version 1.0.0-beta.2 is intended for evaluation in fresh Cacti test
+Version 1.0.0-beta.3 is intended for evaluation in fresh Cacti test
 environments. It is functionally complete, but production deployment is not
 yet recommended.
 
