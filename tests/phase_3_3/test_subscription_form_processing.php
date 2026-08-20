@@ -9,7 +9,7 @@
 require_once('/var/www/html/cacti/include/global.php');
 require_once('/var/www/html/cacti/lib/database.php');
 require_once('/var/www/html/cacti/plugins/gnmi/include/subscription_functions.php');
-require_once('/var/www/html/cacti/plugins/gnmi/pages/subscription_actions.php');
+require_once('/var/www/html/cacti/plugins/gnmi/include/subscription_actions.php');
 
 class TestSubscriptionFormProcessing {
 

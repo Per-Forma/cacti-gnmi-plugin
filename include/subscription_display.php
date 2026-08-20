@@ -44,7 +44,7 @@ function gnmi_render_subscription_section($device_id, $host_id) {
     gnmi_render_edit_metric_form();
 
     // Render JavaScript for UI interactions
-    gnmi_render_subscription_javascript();
+    gnmi_render_subscription_javascript($host_id);
 
     echo '</div>';
 
@@ -132,6 +132,7 @@ function gnmi_render_subscription_row($subscription, $row_class = 'odd') {
         . ' data-path="' . $path . '"'
         . ' data-instance="' . $instance . '"'
         . ' data-enabled="' . ($subscription['enabled'] ? '1' : '0') . '"'
+        . ' data-auto-create-datasources="' . ($subscription['auto_create_datasources'] ? '1' : '0') . '"'
         . ' data-notes="' . html_escape($subscription['notes']) . '"'
         . '>';
     echo '<td><span title="' . $path . '">' .
@@ -325,6 +326,14 @@ function gnmi_render_add_subscription_form($device_id) {
     echo '</div>';
 
     echo '<div class="formRow">';
+    echo '<div class="formLabel">Automatically create Cacti data sources:</div>';
+    echo '<div class="formField">';
+    echo '<input type="checkbox" data-gnmi-name="auto_create_datasources" id="gnmi_sub_auto_create_datasources" checked>';
+    echo '<div class="formDescription">Create missing data sources for enabled metrics during collection.</div>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="formRow">';
     echo '<div class="formLabel"></div>';
     echo '<div class="formField">';
     echo '<input type="button" value="Save Subscription" onclick="gnmi_save_subscription()" class="ui-button ui-corner-all ui-widget">';
@@ -381,6 +390,14 @@ function gnmi_render_edit_subscription_form() {
     echo '<div class="formField">';
     echo '<textarea data-gnmi-name="notes" id="gnmi_edit_sub_notes" rows="3" cols="60"></textarea>';
     echo '<div class="formDescription">Optional description</div>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="formRow">';
+    echo '<div class="formLabel">Automatically create Cacti data sources:</div>';
+    echo '<div class="formField">';
+    echo '<input type="checkbox" data-gnmi-name="auto_create_datasources" id="gnmi_edit_sub_auto_create_datasources">';
+    echo '<div class="formDescription">Create missing data sources for enabled metrics during collection.</div>';
     echo '</div>';
     echo '</div>';
 
@@ -545,11 +562,60 @@ function gnmi_render_add_metric_form($subscription_id) {
 /**
  * Render JavaScript for UI interactions
  *
+ * @param int $host_id Cacti host ID
  * @return bool Success status
  */
-function gnmi_render_subscription_javascript() {
+function gnmi_render_subscription_javascript($host_id) {
+    global $config;
+    $ajax_url = $config['url_path'] . 'plugins/gnmi/ajax_handler.php';
     ?>
     <script type="text/javascript">
+    var gnmiAjaxUrl = <?php echo json_encode($ajax_url); ?>;
+    var gnmiHostId = <?php echo (int)$host_id; ?>;
+    var gnmiRequestsInFlight = {};
+
+    function gnmi_ajax_request(action, payload) {
+        var requestKey = action + ':' + JSON.stringify(payload || {});
+        if (gnmiRequestsInFlight[requestKey]) {
+            return Promise.reject(new Error('This request is already in progress.'));
+        }
+
+        var formData = new FormData();
+        formData.append('action', action);
+        formData.append('host_id', gnmiHostId);
+        Object.keys(payload || {}).forEach(function(key) {
+            formData.append(key, payload[key]);
+        });
+
+        var csrfToken = document.querySelector('input[name="__csrf_magic"]');
+        if (csrfToken) formData.append('__csrf_magic', csrfToken.value);
+
+        gnmiRequestsInFlight[requestKey] = true;
+        return fetch(gnmiAjaxUrl, {
+            method: 'POST',
+            body: formData,
+            credentials: 'include',
+            headers: {'Accept': 'application/json'}
+        })
+        .then(function(response) {
+            return response.text().then(function(body) {
+                var data;
+                try {
+                    data = JSON.parse(body);
+                } catch (error) {
+                    throw new Error('The server returned an invalid response (HTTP ' + response.status + ').');
+                }
+                if (!response.ok || !data.success) {
+                    throw new Error(data.message || ('Request failed with HTTP ' + response.status + '.'));
+                }
+                return data;
+            });
+        })
+        .finally(function() {
+            delete gnmiRequestsInFlight[requestKey];
+        });
+    }
+
     // Detach modal-style sub-forms from the Cacti device-edit <form>.
     // Why: programmatically toggling checkboxes inside these forms (e.g. when
     // [Edit] is clicked on a subscription) flips a named checkbox's state,
@@ -643,6 +709,7 @@ function gnmi_render_subscription_javascript() {
         form.querySelector('[data-gnmi-name="subscription_path"]').value = row.dataset.path    || '';
         form.querySelector('[data-gnmi-name="instance_identifier"]').value = row.dataset.instance || '';
         form.querySelector('[data-gnmi-name="enabled"]').checked         = (row.dataset.enabled === '1');
+        form.querySelector('[data-gnmi-name="auto_create_datasources"]').checked = (row.dataset.autoCreateDatasources === '1');
         form.querySelector('[data-gnmi-name="notes"]').value             = row.dataset.notes   || '';
         form.style.display = 'block';
     }
@@ -661,33 +728,20 @@ function gnmi_render_subscription_javascript() {
             return;
         }
 
-        var formData = new FormData();
-        formData.append('action',                'update_subscription');
-        formData.append('subscription_id',       form.querySelector('[data-gnmi-name="subscription_id"]').value);
-        formData.append('subscription_path',     path);
-        formData.append('instance_identifier',   instance);
-        formData.append('enabled',               form.querySelector('[data-gnmi-name="enabled"]').checked ? '1' : '0');
-        formData.append('notes',                 form.querySelector('[data-gnmi-name="notes"]').value);
-
-        var csrfToken = document.querySelector('input[name="__csrf_magic"]');
-        if (csrfToken) formData.append('__csrf_magic', csrfToken.value);
-
-        fetch('plugins/gnmi/ajax_handler.php', {
-            method: 'POST',
-            body: formData,
-            credentials: 'include'
+        gnmi_ajax_request('update_subscription', {
+            subscription_id: form.querySelector('[data-gnmi-name="subscription_id"]').value,
+            subscription_path: path,
+            instance_identifier: instance,
+            enabled: form.querySelector('[data-gnmi-name="enabled"]').checked ? '1' : '0',
+            auto_create_datasources: form.querySelector('[data-gnmi-name="auto_create_datasources"]').checked ? '1' : '0',
+            notes: form.querySelector('[data-gnmi-name="notes"]').value
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                alert('Subscription updated successfully!');
-                gnmi_hide_edit_subscription_form();
-                location.reload();
-            } else {
-                alert('Error updating subscription: ' + (data.message || 'Unknown error'));
-            }
+        .then(function() {
+            alert('Subscription updated successfully!');
+            gnmi_hide_edit_subscription_form();
+            location.reload();
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('gNMI: update subscription error:', error);
             alert('Error updating subscription: ' + error.message);
         });
@@ -696,33 +750,15 @@ function gnmi_render_subscription_javascript() {
     function gnmi_delete_subscription(subscription_id) {
         console.log('gNMI: Deleting subscription ' + subscription_id + ' via AJAX...');
 
-        var formData = new FormData();
-        formData.append('action', 'delete_subscription');
-        formData.append('subscription_id', subscription_id);
-        formData.append('confirm', '1');
-
-        // Add CSRF token if available
-        var csrfToken = document.querySelector('input[name="__csrf_magic"]');
-        if (csrfToken) {
-            formData.append('__csrf_magic', csrfToken.value);
-        }
-
-        fetch('plugins/gnmi/ajax_handler.php', {
-            method: 'POST',
-            body: formData,
-            credentials: 'include'
+        gnmi_ajax_request('delete_subscription', {
+            subscription_id: subscription_id,
+            confirm: '1'
         })
-        .then(response => response.json())
-        .then(data => {
-            console.log('gNMI: AJAX delete subscription response:', data);
-            if (data.success) {
-                alert('Subscription deleted successfully!');
-                location.reload();
-            } else {
-                alert('Error deleting subscription: ' + (data.message || 'Unknown error'));
-            }
+        .then(function() {
+            alert('Subscription deleted successfully!');
+            location.reload();
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('gNMI: AJAX delete subscription error:', error);
             alert('Error deleting subscription: ' + error.message);
         });
@@ -765,35 +801,21 @@ function gnmi_render_subscription_javascript() {
             return;
         }
 
-        var formData = new FormData();
-        formData.append('action',         'update_metric');
-        formData.append('metric_id',      form.querySelector('[data-gnmi-name="metric_id"]').value);
-        formData.append('metric_name',    metricName);
-        formData.append('rrd_type',       form.querySelector('[data-gnmi-name="rrd_type"]').value);
-        formData.append('enabled',        form.querySelector('[data-gnmi-name="enabled"]').checked ? '1' : '0');
-        formData.append('rrd_heartbeat',  form.querySelector('[data-gnmi-name="rrd_heartbeat"]').value);
-        formData.append('rrd_min',        form.querySelector('[data-gnmi-name="rrd_min"]').value);
-        formData.append('rrd_max',        form.querySelector('[data-gnmi-name="rrd_max"]').value);
-
-        var csrfToken = document.querySelector('input[name="__csrf_magic"]');
-        if (csrfToken) formData.append('__csrf_magic', csrfToken.value);
-
-        fetch('plugins/gnmi/ajax_handler.php', {
-            method: 'POST',
-            body: formData,
-            credentials: 'include'
+        gnmi_ajax_request('update_metric', {
+            metric_id: form.querySelector('[data-gnmi-name="metric_id"]').value,
+            metric_name: metricName,
+            rrd_type: form.querySelector('[data-gnmi-name="rrd_type"]').value,
+            enabled: form.querySelector('[data-gnmi-name="enabled"]').checked ? '1' : '0',
+            rrd_heartbeat: form.querySelector('[data-gnmi-name="rrd_heartbeat"]').value,
+            rrd_min: form.querySelector('[data-gnmi-name="rrd_min"]').value,
+            rrd_max: form.querySelector('[data-gnmi-name="rrd_max"]').value
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                alert('Metric updated successfully!');
-                gnmi_hide_edit_metric_form();
-                location.reload();
-            } else {
-                alert('Error updating metric: ' + (data.message || 'Unknown error'));
-            }
+        .then(function() {
+            alert('Metric updated successfully!');
+            gnmi_hide_edit_metric_form();
+            location.reload();
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('gNMI: update metric error:', error);
             alert('Error updating metric: ' + error.message);
         });
@@ -803,32 +825,12 @@ function gnmi_render_subscription_javascript() {
         if (confirm("Are you sure you want to delete this metric?")) {
             console.log('gNMI: Deleting metric ' + metric_id + ' via AJAX...');
 
-            var formData = new FormData();
-            formData.append('action', 'delete_metric');
-            formData.append('metric_id', metric_id);
-
-            // Add CSRF token if available
-            var csrfToken = document.querySelector('input[name="__csrf_magic"]');
-            if (csrfToken) {
-                formData.append('__csrf_magic', csrfToken.value);
-            }
-
-            fetch('plugins/gnmi/ajax_handler.php', {
-                method: 'POST',
-                body: formData,
-                credentials: 'include'
+            gnmi_ajax_request('delete_metric', {metric_id: metric_id, confirm: '1'})
+            .then(function() {
+                alert('Metric deleted successfully!');
+                location.reload();
             })
-            .then(response => response.json())
-            .then(data => {
-                console.log('gNMI: AJAX delete metric response:', data);
-                if (data.success) {
-                    alert('Metric deleted successfully!');
-                    location.reload();
-                } else {
-                    alert('Error deleting metric: ' + (data.message || 'Unknown error'));
-                }
-            })
-            .catch(error => {
+            .catch(function(error) {
                 console.error('gNMI: AJAX delete metric error:', error);
                 alert('Error deleting metric: ' + error.message);
             });
@@ -836,44 +838,22 @@ function gnmi_render_subscription_javascript() {
     }
 
     function gnmi_create_datasource(metric_id) {
-        var formData = new FormData();
-        formData.append('action', 'create_datasource');
-        formData.append('metric_id', metric_id);
-        var csrfToken = document.querySelector('input[name="__csrf_magic"]');
-        if (csrfToken) formData.append('__csrf_magic', csrfToken.value);
-
-        fetch('plugins/gnmi/ajax_handler.php', { method: 'POST', body: formData })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    location.reload();
-                } else {
-                    alert('Failed to create data source: ' + (data.message || 'Unknown error'));
-                }
+        gnmi_ajax_request('create_datasource', {metric_id: metric_id})
+            .then(function() {
+                location.reload();
             })
-            .catch(error => {
+            .catch(function(error) {
                 console.error('gNMI: create datasource error:', error);
                 alert('Error creating data source: ' + error.message);
             });
     }
 
     function gnmi_create_graph(metric_id) {
-        var formData = new FormData();
-        formData.append('action', 'create_graph');
-        formData.append('metric_id', metric_id);
-        var csrfToken = document.querySelector('input[name="__csrf_magic"]');
-        if (csrfToken) formData.append('__csrf_magic', csrfToken.value);
-
-        fetch('plugins/gnmi/ajax_handler.php', { method: 'POST', body: formData })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    location.reload();
-                } else {
-                    alert('Failed to create graph: ' + (data.message || 'Unknown error'));
-                }
+        gnmi_ajax_request('create_graph', {metric_id: metric_id})
+            .then(function() {
+                location.reload();
             })
-            .catch(error => {
+            .catch(function(error) {
                 console.error('gNMI: create graph error:', error);
                 alert('Error creating graph: ' + error.message);
             });
@@ -892,45 +872,20 @@ function gnmi_render_subscription_javascript() {
             alert('Subscription Path and Instance Identifier are required.');
             return;
         }
-        var formData = new FormData();
-        formData.append('action', 'add_subscription');
-        formData.append('device_id', subForm.querySelector('[data-gnmi-name="device_id"]').value);
-        formData.append('subscription_path', subForm.querySelector('[data-gnmi-name="subscription_path"]').value);
-        formData.append('instance_identifier', subForm.querySelector('[data-gnmi-name="instance_identifier"]').value);
-        formData.append('enabled', subForm.querySelector('[data-gnmi-name="enabled"]').checked ? '1' : '0');
-        formData.append('notes', subForm.querySelector('[data-gnmi-name="notes"]').value);
-
-        // Add CSRF token if available
-        var csrfToken = document.querySelector('input[name="__csrf_magic"]');
-        if (csrfToken) {
-            formData.append('__csrf_magic', csrfToken.value);
-        }
-
-        // Debug: Log form data
-        console.log('gNMI: AJAX form data:');
-        for (var pair of formData.entries()) {
-            console.log('  ' + pair[0] + ': ' + pair[1]);
-        }
-
-        // Submit via AJAX to our dedicated AJAX handler
-        fetch('plugins/gnmi/ajax_handler.php', {
-            method: 'POST',
-            body: formData,
-            credentials: 'include'
+        gnmi_ajax_request('add_subscription', {
+            device_id: subForm.querySelector('[data-gnmi-name="device_id"]').value,
+            subscription_path: path,
+            instance_identifier: instance,
+            enabled: subForm.querySelector('[data-gnmi-name="enabled"]').checked ? '1' : '0',
+            auto_create_datasources: subForm.querySelector('[data-gnmi-name="auto_create_datasources"]').checked ? '1' : '0',
+            notes: subForm.querySelector('[data-gnmi-name="notes"]').value
         })
-        .then(response => response.json())
-        .then(data => {
-            console.log('gNMI: AJAX response:', data);
-            if (data.success) {
-                alert('Subscription saved successfully!');
-                gnmi_hide_add_subscription_form();
-                // TODO: Refresh subscription list
-                location.reload(); // Temporary - refresh page to show new subscription
-            } else {
-                alert('Error saving subscription: ' + (data.message || 'Unknown error'));
-            }
+        .then(function() {
+            alert('Subscription saved successfully!');
+            gnmi_hide_add_subscription_form();
+            location.reload();
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('gNMI: AJAX error:', error);
             alert('Error saving subscription: ' + error.message);
         });
@@ -948,44 +903,18 @@ function gnmi_render_subscription_javascript() {
             alert('Metric Name is required.');
             return;
         }
-        var formData = new FormData();
-        formData.append('action', 'add_metric');
-        formData.append('subscription_id', subscription_id);
-        formData.append('metric_name', metricForm.querySelector('[data-gnmi-name="metric_name"]').value);
-        formData.append('rrd_type', metricForm.querySelector('[data-gnmi-name="rrd_type"]').value);
-        formData.append('enabled', metricForm.querySelector('[data-gnmi-name="enabled"]').checked ? '1' : '0');
-
-        // Add CSRF token if available
-        var csrfToken = document.querySelector('input[name="__csrf_magic"]');
-        if (csrfToken) {
-            formData.append('__csrf_magic', csrfToken.value);
-        }
-
-        // Debug: Log form data
-        console.log('gNMI: AJAX metric form data:');
-        for (var pair of formData.entries()) {
-            console.log('  ' + pair[0] + ': ' + pair[1]);
-        }
-
-        // Submit via AJAX to our dedicated AJAX handler
-        fetch('plugins/gnmi/ajax_handler.php', {
-            method: 'POST',
-            body: formData,
-            credentials: 'include'
+        gnmi_ajax_request('add_metric', {
+            subscription_id: subscription_id,
+            metric_name: metricName,
+            rrd_type: metricForm.querySelector('[data-gnmi-name="rrd_type"]').value,
+            enabled: metricForm.querySelector('[data-gnmi-name="enabled"]').checked ? '1' : '0'
         })
-        .then(response => response.json())
-        .then(data => {
-            console.log('gNMI: AJAX metric response:', data);
-            if (data.success) {
-                alert('Metric saved successfully!');
-                gnmi_hide_add_metric_form(subscription_id);
-                // TODO: Refresh metric list
-                location.reload(); // Temporary - refresh page to show new metric
-            } else {
-                alert('Error saving metric: ' + (data.message || 'Unknown error'));
-            }
+        .then(function() {
+            alert('Metric saved successfully!');
+            gnmi_hide_add_metric_form(subscription_id);
+            location.reload();
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('gNMI: AJAX metric error:', error);
             alert('Error saving metric: ' + error.message);
         });

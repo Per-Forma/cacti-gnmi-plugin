@@ -72,6 +72,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up PHP for package inspection
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          coverage: none
+
       - name: Reject generated or sensitive artifacts
         shell: bash
         run: |
@@ -98,7 +104,7 @@ jobs:
         run: python -m unittest tests.test_public_docs
 
       - name: Smoke-test prerelease packaging
-        run: deployment/package_release.sh --allow-dirty 1.0.0-beta.2
+        run: deployment/package_release.sh --allow-dirty 1.0.0-beta.3
 
       - name: Inspect packaged artifact
         shell: bash
@@ -115,6 +121,9 @@ jobs:
           tar xzf "$tarball" -C "$extract_dir"
           package_root=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d -print -quit)
           test -n "$package_root"
+          test -f "$package_root/gnmi/ajax_handler.php"
+          test -f "$package_root/gnmi/include/subscription_actions.php"
+          find "$package_root/gnmi" -name '*.php' -print0 | xargs -0 -n1 php -l
           (
             cd "$package_root"
             shasum -a 256 -c CHECKSUMS.txt
@@ -203,7 +212,34 @@ jobs:
             for test in /var/www/html/cacti/plugins/gnmi/tests/status_dashboard/*.php; do
               php "$test"
             done
+            for test in /var/www/html/cacti/plugins/gnmi/tests/ajax_actions/*.php; do
+              php "$test"
+            done
           '
+
+      - name: Verify unauthenticated AJAX responses remain JSON
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.error
+          import urllib.request
+
+          url = "http://127.0.0.1:7083/cacti/plugins/gnmi/ajax_handler.php"
+          checks = [
+              (urllib.request.Request(url), 405, "method_not_allowed"),
+              (urllib.request.Request(url, data=b"action=add_subscription", method="POST"), 403, "permission_denied"),
+          ]
+          for request, expected_status, expected_code in checks:
+              try:
+                  urllib.request.urlopen(request)
+                  raise AssertionError("request unexpectedly succeeded")
+              except urllib.error.HTTPError as error:
+                  payload = json.loads(error.read().decode("utf-8"))
+                  assert error.code == expected_status, (error.code, payload)
+                  assert payload["success"] is False, payload
+                  assert payload["code"] == expected_code, payload
+          PY
 
       - name: Show Cacti logs after failure
         if: failure()

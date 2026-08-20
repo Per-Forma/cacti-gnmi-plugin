@@ -19,12 +19,19 @@ STAGED_PLUGIN="$STAGING_ROOT/gnmi"
 
 mkdir -p "$STAGED_PLUGIN/scripts/gnmi_collector"
 
+for required_item in \
+	setup.php INFO index.php status.php ajax_handler.php test_connection.php \
+	include include/subscription_actions.php README.md LICENSE; do
+	if [[ ! -e "$PROJECT_ROOT/$required_item" ]]; then
+		printf 'Required runtime item is missing: %s\n' "$required_item" >&2
+		exit 1
+	fi
+done
+
 for item in \
 	setup.php INFO index.php status.php ajax_handler.php test_connection.php \
-	pages include README.md LICENSE; do
-	if [[ -e "$PROJECT_ROOT/$item" ]]; then
-		cp -R "$PROJECT_ROOT/$item" "$STAGED_PLUGIN/"
-	fi
+	include README.md LICENSE; do
+	cp -R "$PROJECT_ROOT/$item" "$STAGED_PLUGIN/"
 done
 
 for item in \
@@ -36,6 +43,9 @@ for item in \
 done
 cp -R "$PROJECT_ROOT/scripts/gnmi_collector/." \
 	"$STAGED_PLUGIN/scripts/gnmi_collector/"
+
+find "$STAGED_PLUGIN" -type d -name '__pycache__' -prune -exec rm -rf {} +
+find "$STAGED_PLUGIN" -type f -name '*.pyc' -delete
 
 if find "$STAGED_PLUGIN" -type f \( \
 	-name '*.rrd' -o -name '*.pem' -o -name '*.key' -o -name '*.crt' -o \
