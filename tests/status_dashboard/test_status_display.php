@@ -218,6 +218,28 @@ function test_empty_devices() {
 	assert_true(strpos($html, 'No gNMI devices') !== false, "Empty array should show 'No gNMI devices' message");
 }
 
+// Test 11: Legacy TLS policy is visible without changing health status
+function test_legacy_tls_policy_badge() {
+	$devices = array(array(
+		'device_id' => 1,
+		'hostname' => '192.168.1.1',
+		'device_description' => 'Legacy Target',
+		'daemon_status' => 'running',
+		'daemon_pid' => 12345,
+		'health' => 'healthy',
+		'uptime_seconds' => 3600,
+		'data_age_seconds' => 10,
+		'last_poll_time' => null,
+		'last_poll_status' => 'success',
+		'last_error_message' => null,
+		'tls_cipher_policy' => 'legacy_compatibility',
+		'host_id' => 1,
+	));
+
+	$html = gnmi_render_summary_table($devices);
+	assert_true(strpos($html, 'Legacy TLS') !== false, "Legacy TLS policy should be visible in the summary");
+}
+
 // Run all tests
 echo "Running status display tests...\n\n";
 test_summary_table_returns_html();
@@ -230,6 +252,7 @@ test_device_detail_content();
 test_events_table();
 test_format_event_data();
 test_empty_devices();
+test_legacy_tls_policy_badge();
 
 // Print summary
 echo "\n=== Test Summary ===\n";

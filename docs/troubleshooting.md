@@ -205,7 +205,7 @@ ssl.SSLError: [SSL: SSLV3_ALERT_HANDSHAKE_FAILURE]
    docker exec cacti_app cat /tmp/gnmi_config.json
    ```
 
-3. **Verify TLS override is set** (for Ciena devices):
+3. **Verify TLS override matches the certificate SAN:**
    ```json
    {
      "tls_override": "gnmi-lab.example.invalid",
@@ -217,6 +217,12 @@ ssl.SSLError: [SSL: SSLV3_ALERT_HANDSHAKE_FAILURE]
    ```bash
    openssl s_client -connect 192.0.2.10:9339 -showcerts
    ```
+
+5. **Check for a cipher-policy mismatch:** if TCP and an OpenSSL mTLS test
+   succeed but gRPC times out with a handshake failure, select **Legacy TLS
+   compatibility** and retest. This vendor-neutral option permits
+   `ECDHE-RSA-AES128-SHA`; it does not disable certificate verification. Fixing
+   the target's TLS profile to offer modern AEAD ciphers remains preferred.
 
 #### B. Network Connectivity
 

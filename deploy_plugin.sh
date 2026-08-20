@@ -31,7 +31,7 @@ for item in \
 	DAEMON_README.md README.md __init__.py analyze_daemon_logs.py \
 	check_data_continuity.py gnmi_connection_test.py gnmi_daemon.py \
 	gnmi_daemon_ctl.py gnmi_daemon_monitor.py gnmi_poller_bridge.py \
-	gnmi_runtime.py requirements.txt requirements-installed.txt; do
+	gnmi_runtime.py gnmi_tls.py requirements.txt requirements-installed.txt; do
 	cp "$PROJECT_ROOT/scripts/$item" "$STAGED_PLUGIN/scripts/"
 done
 cp -R "$PROJECT_ROOT/scripts/gnmi_collector/." \

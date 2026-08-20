@@ -1427,6 +1427,9 @@ function gnmi_build_daemon_config($device_id) {
 			? 'ciena_saos10'
 			: 'standard',
 		'skip_verify' => (bool)$device['skip_verify'],
+		'tls_cipher_policy' => (($device['tls_cipher_policy'] ?? 'default') === 'legacy_compatibility')
+			? 'legacy_compatibility'
+			: 'default',
 		'ca_cert' => !empty($device['ca_cert_path']) ? $device['ca_cert_path'] : '',
 		'client_key' => !empty($device['client_key_path']) ? $device['client_key_path'] : '',
 		'client_cert' => !empty($device['client_cert_path']) ? $device['client_cert_path'] : '',
@@ -1767,7 +1770,7 @@ function gnmi_check_subscription_config_changed($device_id, $db_subscriptions = 
 	// Also check key device-level config fields (connection + interval)
 	$device = db_fetch_row_prepared('SELECT * FROM plugin_gnmi_devices WHERE id = ?', array($device_id));
 	if ($device) {
-		$fields_to_check = ['collection_interval', 'hostname', 'port', 'username', 'password', 'use_tls', 'tls_override', 'skip_verify', 'encoding', 'compatibility_mode'];
+		$fields_to_check = ['collection_interval', 'hostname', 'port', 'username', 'password', 'use_tls', 'tls_override', 'skip_verify', 'tls_cipher_policy', 'encoding', 'compatibility_mode'];
 		// Booleans in JSON vs "0"/"1" from MySQL — must not use (string) cast (see gnmi_coerce_daemon_config_bool).
 		$bool_fields = ['use_tls', 'skip_verify'];
 		foreach ($fields_to_check as $field) {

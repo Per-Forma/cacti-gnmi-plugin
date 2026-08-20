@@ -308,6 +308,13 @@ assert_not_contains_test(
 );
 assert_equals_test('standard', gnmi_normalize_compatibility_mode('unexpected'), "Unknown compatibility modes should normalize to standard");
 assert_equals_test('ciena_saos10', gnmi_normalize_compatibility_mode('ciena_saos10'), "Ciena compatibility mode should be preserved");
+assert_equals_test('default', gnmi_normalize_tls_cipher_policy('unexpected'), "Unknown TLS cipher policies should use gRPC defaults");
+assert_equals_test('legacy_compatibility', gnmi_normalize_tls_cipher_policy('legacy_compatibility'), "Legacy TLS cipher policy should be preserved");
+assert_contains_test(
+	'tls_cipher_policy',
+	gnmi_detect_config_changes(['tls_cipher_policy' => 'default'], ['tls_cipher_policy' => 'legacy_compatibility']),
+	"TLS cipher policy changes should restart the daemon"
+);
 assert_equals_test('JSON_IETF', gnmi_encoding_for_compatibility_mode('standard'), "Standard mode should use JSON_IETF");
 assert_equals_test('JSON', gnmi_encoding_for_compatibility_mode('ciena_saos10'), "Ciena mode should use legacy JSON");
 
@@ -325,6 +332,38 @@ $errors = gnmi_validate_form_input([
 	'compatibility_mode' => 'unexpected',
 ]);
 assert_contains_test('Compatibility Mode is invalid', $errors, "Should reject an invalid compatibility mode");
+
+$errors = gnmi_validate_form_input([
+	'gnmi_hostname' => 'router',
+	'gnmi_port' => '9339',
+	'gnmi_username' => 'user',
+	'gnmi_password' => 'pass',
+	'tls_cipher_policy' => 'arbitrary',
+]);
+assert_contains_test('TLS Cipher Policy is invalid', $errors, "Should reject an invalid TLS cipher policy");
+
+ob_start();
+gnmi_render_device_form_section(0, [
+	'enabled' => 1,
+	'use_tls' => 1,
+	'tls_cipher_policy' => 'legacy_compatibility',
+], [], 'router.example.com');
+$rendered_form = ob_get_clean();
+assert_equals_test(
+	true,
+	strpos($rendered_form, 'name="tls_cipher_policy"') !== false,
+	"Device form should render the TLS cipher policy selector"
+);
+assert_equals_test(
+	true,
+	strpos($rendered_form, 'value="legacy_compatibility" selected') !== false,
+	"Device form should preserve the selected legacy TLS policy"
+);
+assert_equals_test(
+	true,
+	strpos($rendered_form, 'Certificate verification and mTLS remain enabled') !== false,
+	"Device form should explain the legacy TLS security boundary"
+);
 
 echo "\n";
 

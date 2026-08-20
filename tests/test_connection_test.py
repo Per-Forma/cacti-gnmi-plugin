@@ -1,9 +1,11 @@
 """Tests for the user-facing three-stage gNMI connection probe."""
 
 import json
+import os
 import signal
 import socket
 import sys
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import Mock
 
@@ -12,8 +14,20 @@ import pytest
 from scripts import gnmi_connection_test as probe
 
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
 def emitted(capsys):
     return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def test_php_endpoint_preserves_redacted_native_failure_diagnostics():
+    source = (REPOSITORY_ROOT / "test_connection.php").read_text()
+
+    assert "2>/dev/null" not in source
+    assert "gnmi_test_stderr_" in source
+    assert "$exit_code !== 0" in source
+    assert "[redacted]" in source
 
 
 def test_emit_writes_ndjson(capsys):
@@ -102,6 +116,24 @@ def test_stage_tls_applies_ciena_patch_only_when_selected(monkeypatch, capsys):
     assert client.kwargs["insecure"] is True
     patch_ciena.assert_called_once_with()
     assert "Insecure gNMI transport OK" in emitted(capsys)["message"]
+
+
+def test_stage_tls_applies_explicit_legacy_cipher_policy(monkeypatch, capsys):
+    install_tls_client(monkeypatch)
+    TLSClient.instances.clear()
+    TLSClient.connect_error = None
+    monkeypatch.setenv("GRPC_SSL_CIPHER_SUITES", "inherited")
+
+    client = probe.stage_tls({
+        "hostname": "router", "port": 9339,
+        "use_tls": True, "tls_cipher_policy": "legacy_compatibility",
+    })
+
+    assert client is TLSClient.instances[0]
+    assert os.environ["GRPC_SSL_CIPHER_SUITES"] == (
+        "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA"
+    )
+    assert "Legacy TLS compatibility" in emitted(capsys)["message"]
 
 
 @pytest.mark.parametrize(

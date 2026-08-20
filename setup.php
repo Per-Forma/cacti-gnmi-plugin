@@ -8,7 +8,7 @@
 function plugin_gnmi_version() {
 	return array(
 		'name'        => 'gNMI Telemetry',
-		'version'     => '1.0.0-beta.1',
+		'version'     => '1.0.0-beta.2',
 		'longname'    => 'gNMI Telemetry Collection for Cacti',
 		'author'      => 'Jarred Masterson',
 		'homepage'    => 'https://github.com/Per-Forma/cacti-gnmi-plugin',
@@ -22,7 +22,7 @@ function plugin_gnmi_version() {
 function plugin_gnmi_config() {
 	return array(
 		'name' => 'gNMI Telemetry',
-		'version' => '1.0.0-beta.1',
+		'version' => '1.0.0-beta.2',
 		'author' => 'Jarred Masterson',
 		'homepage' => 'https://github.com/Per-Forma/cacti-gnmi-plugin',
 		'email' => 'jarred.masterson@gmail.com',
@@ -292,6 +292,7 @@ function plugin_gnmi_install() {
 		`client_cert_path` varchar(255) COMMENT 'Path to client certificate file (for mTLS)',
 		`tls_override` varchar(255) COMMENT 'Override server name for certificate validation (lab environments)',
 		`skip_verify` boolean NOT NULL DEFAULT FALSE COMMENT 'Skip TLS certificate verification (NOT recommended for production)',
+		`tls_cipher_policy` ENUM('default','legacy_compatibility') NOT NULL DEFAULT 'default' COMMENT 'Per-device gRPC TLS cipher policy',
 		`collection_interval` int(5) unsigned NOT NULL DEFAULT 10 COMMENT 'Collection interval in seconds (must align with Cacti poll interval)',
 		`encoding` varchar(50) NOT NULL DEFAULT 'JSON_IETF' COMMENT 'gNMI encoding format (JSON_IETF, PROTO, etc)',
 		`last_poll_time` timestamp NULL DEFAULT NULL COMMENT 'Last successful poll timestamp',
@@ -474,6 +475,7 @@ function plugin_gnmi_install() {
 	// Device hostname inheritance and Phase 3.4 schema additions.
 	gnmi_apply_hostname_source_schema();
 	gnmi_apply_compatibility_mode_schema();
+	gnmi_apply_tls_cipher_policy_schema();
 	gnmi_apply_schema_34();
 
 	return true;
@@ -675,6 +677,37 @@ function gnmi_apply_compatibility_mode_schema() {
 		}
 
 		cacti_log('gNMI: Added compatibility_mode column with standard gNMI behavior as the default', false, 'INSTALL', POLLER_VERBOSITY_MEDIUM);
+	}
+
+	return true;
+}
+
+/**
+ * Add the vendor-neutral per-device TLS cipher policy selector.
+ *
+ * Existing devices retain gRPC's secure defaults. Operators must explicitly
+ * opt a target into the legacy compatibility cipher allowance.
+ *
+ * @return bool True on success.
+ */
+function gnmi_apply_tls_cipher_policy_schema() {
+	$cols = db_fetch_assoc('DESCRIBE plugin_gnmi_devices');
+	if (!is_array($cols)) {
+		return false;
+	}
+
+	$col_names = array_column($cols, 'Field');
+	if (!in_array('tls_cipher_policy', $col_names, true)) {
+		$result = db_execute("ALTER TABLE plugin_gnmi_devices
+			ADD COLUMN tls_cipher_policy ENUM('default','legacy_compatibility') NOT NULL DEFAULT 'default'
+			COMMENT 'Per-device gRPC TLS cipher policy'
+			AFTER skip_verify");
+		if ($result === false) {
+			cacti_log('gNMI: Failed to add tls_cipher_policy column: ' . db_fetch_error(), false, 'INSTALL', POLLER_VERBOSITY_LOW);
+			return false;
+		}
+
+		cacti_log('gNMI: Added tls_cipher_policy column with secure gRPC defaults', false, 'INSTALL', POLLER_VERBOSITY_MEDIUM);
 	}
 
 	return true;
@@ -1150,6 +1183,7 @@ function plugin_gnmi_upgrade() {
 	// Apply schema additions (idempotent).
 	gnmi_apply_hostname_source_schema();
 	gnmi_apply_compatibility_mode_schema();
+	gnmi_apply_tls_cipher_policy_schema();
 	gnmi_apply_schema_34();
 
 	return true;

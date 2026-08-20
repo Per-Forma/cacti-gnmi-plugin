@@ -43,7 +43,9 @@ Devices → (create/edit a device)**.
    | Encoding | Wire encoding. The plugin uses `JSON_IETF`. |
 
 3. TLS / Advanced (collapsible): enable TLS, point to CA / client cert / client
-   key paths, set a TLS name override, or skip verification. Covered in
+   key paths, set a TLS name override, select an explicit cipher policy, or
+   skip verification. Legacy TLS compatibility is vendor-neutral and should be
+   used only when a target cannot negotiate gRPC defaults. Covered in
    [security.md](security.md).
 4. **Save.**
 

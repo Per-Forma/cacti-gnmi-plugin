@@ -98,7 +98,7 @@ jobs:
         run: python -m unittest tests.test_public_docs
 
       - name: Smoke-test prerelease packaging
-        run: deployment/package_release.sh --allow-dirty 1.0.0-beta.1
+        run: deployment/package_release.sh --allow-dirty 1.0.0-beta.2
 
       - name: Inspect packaged artifact
         shell: bash

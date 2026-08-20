@@ -512,7 +512,7 @@ class TestDaemonDynamicConfig {
         }
 
         // Verify device connection info is included
-        $required_fields = ['device_id', 'hostname', 'port', 'username', 'password', 'use_tls', 'insecure', 'compatibility_mode', 'encoding', 'collection_interval'];
+        $required_fields = ['device_id', 'hostname', 'port', 'username', 'password', 'use_tls', 'insecure', 'compatibility_mode', 'tls_cipher_policy', 'encoding', 'collection_interval'];
         foreach ($required_fields as $field) {
             if (!isset($config[$field])) {
                 throw new Exception('Config missing field: ' . $field);

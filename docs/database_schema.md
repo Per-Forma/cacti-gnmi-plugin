@@ -56,6 +56,7 @@ One row stores the gNMI connection and daemon state for one Cacti host.
 | `ca_cert_path`, `client_key_path`, `client_cert_path` | nullable varchar(255) | TLS and mTLS material beneath the protected certificate directory |
 | `tls_override` | nullable varchar(255) | TLS server-name override |
 | `skip_verify` | boolean, `FALSE` | Disables certificate verification when explicitly selected |
+| `tls_cipher_policy` | `default` or `legacy_compatibility`, default `default` | Selects gRPC defaults or the explicit vendor-neutral legacy TLS allowance |
 | `collection_interval` | unsigned integer, `10` | Requested daemon collection interval in seconds |
 | `encoding` | varchar(50), `JSON_IETF` | gNMI wire encoding |
 | `last_poll_time` | nullable timestamp | Most recent successful poll time |

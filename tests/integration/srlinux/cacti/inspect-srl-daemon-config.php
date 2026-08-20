@@ -28,6 +28,7 @@ $bool_fields = ['use_tls', 'skip_verify'];
 $fields = [
 	'collection_interval', 'hostname', 'port', 'username', 'use_tls',
 	'tls_override', 'skip_verify', 'encoding', 'compatibility_mode',
+	'tls_cipher_policy',
 ];
 
 foreach ($fields as $field) {
