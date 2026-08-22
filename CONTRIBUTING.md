@@ -31,6 +31,20 @@ Tests that exercise Cacti application APIs must run from a deployed Cacti tree.
 The reproducible environments under `tests/integration/` cover the supported
 Cacti boundary and the SR Linux interoperability scenario.
 
+For a running local Docker Cacti instance, deploy the plugin and bootstrap its
+runtime dependencies with the container's Python interpreter:
+
+```bash
+./deploy_plugin.sh cacti_app:/var/www/html/cacti/plugins/gnmi/
+./deployment/bootstrap_local_docker.sh
+```
+
+The bootstrap is idempotent. It leaves a current environment alone and replaces
+`venv/` only after a fresh environment passes import and dependency checks when
+the existing environment came from another host/interpreter or its pinned
+dependencies changed. Override the defaults with `--container` and
+`--plugin-path`.
+
 ## Pull requests
 
 1. Create a branch from `main`.
