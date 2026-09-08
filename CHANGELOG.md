@@ -7,6 +7,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added an idempotent local-Docker bootstrap that verifies the gNMI Python
+  environment against the container interpreter and safely rebuilds stale or
+  incompatible dependencies before replacing the active virtualenv.
+
+### Changed
+
+- Hardened prerelease packaging checks to reject virtualenv directories and
+  build remnants under common venv naming variants.
+
 ## [1.0.0-beta.3] - 2026-08-20
 
 ### Added

@@ -156,7 +156,7 @@ done
 find "$PACKAGE_DIR/gnmi" -type d -name "__pycache__" -prune -exec rm -rf {} +
 find "$PACKAGE_DIR/gnmi" -type d -name ".pytest_cache" -prune -exec rm -rf {} +
 find "$PACKAGE_DIR/gnmi" -type d -name "htmlcov" -prune -exec rm -rf {} +
-find "$PACKAGE_DIR/gnmi" -type d -name "venv" -prune -exec rm -rf {} +
+find "$PACKAGE_DIR/gnmi" -type d \( -name "venv*" -o -name ".venv*" \) -prune -exec rm -rf {} +
 find "$PACKAGE_DIR/gnmi" -type d -name "runtime" -prune -exec rm -rf {} +
 find "$PACKAGE_DIR/gnmi" -type d -name "storage" -prune -exec rm -rf {} +
 find "$PACKAGE_DIR/gnmi" -type d -name "certs" -prune -exec rm -rf {} +
@@ -203,7 +203,7 @@ fi
 	shasum -a 256 -c CHECKSUMS.txt >/dev/null
 )
 
-FORBIDDEN_PATTERN='/(venv|runtime|htmlcov|\.pytest_cache|tests)/|\.rrd$|\.pem$|\.key$|\.crt$|\.p12$|\.pfx$|\.pyc$|requirements-dev\.txt$|gnmi_poller\.py$|validate_bridge_|validate_schema\.sql$|^gnmi/test_ajax\.php$|^gnmi/status_test\.php$|^gnmi/subscription_ajax\.php$|^gnmi/subscription_actions(_minimal)?\.php$'
+FORBIDDEN_PATTERN='/((\.)?venv([^/]*)?|runtime|htmlcov|\.pytest_cache|tests)/|\.rrd$|\.pem$|\.key$|\.crt$|\.p12$|\.pfx$|\.pyc$|requirements-dev\.txt$|gnmi_poller\.py$|validate_bridge_|validate_schema\.sql$|^gnmi/test_ajax\.php$|^gnmi/status_test\.php$|^gnmi/subscription_ajax\.php$|^gnmi/subscription_actions(_minimal)?\.php$'
 FORBIDDEN_FILE="/tmp/gnmi_release_forbidden.$$"
 if find "$PACKAGE_DIR" -type f | sed "s|$PACKAGE_DIR/||" | grep -E "$FORBIDDEN_PATTERN" >"$FORBIDDEN_FILE"; then
 	echo "ERROR: forbidden files detected in prerelease package:" >&2
