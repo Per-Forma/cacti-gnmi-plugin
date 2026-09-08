@@ -1,7 +1,7 @@
 cffi==2.1.1
 cryptography==50.0.1
 dictdiffer==0.10.0
-grpcio==1.83.0
+grpcio==1.83.1
 protobuf==7.36.1
 pycparser==3.0
 pygnmi==0.8.15
