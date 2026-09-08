@@ -97,6 +97,9 @@ def main():
     datasource = admin.action('create_datasource', 201, 'datasource_created', **target)
     assert datasource['local_data_id'] > 0
     admin.action('create_datasource', 200, 'datasource_exists', **target)
+    partner = admin.action('add_metric', 201, 'metric_created',
+        metric_name='out-octets', rrd_type='COUNTER', enabled=1, **sub)['metric_id']
+    admin.action('create_datasource', 201, 'datasource_created', metric_id=partner, **host)
     graph = admin.action('create_graph', 201, 'graph_created', **target)
     assert graph['graph_local_id'] > 0
     admin.action('restart_daemon', 200, 'daemon_restarted', **host)
@@ -110,8 +113,9 @@ def main():
         auto_create_datasources=0, **device)['subscription_id']
     temporary = admin.action('add_metric', 201, 'metric_created',
         subscription_id=disposable, metric_name='out-octets', rrd_type='COUNTER', **host)['metric_id']
-    admin.action('delete_metric', 200, 'metric_deleted', metric_id=temporary, **host)
-    admin.action('delete_subscription', 200, 'subscription_deleted', subscription_id=disposable, **host)
+    admin.action('delete_metric', 400, 'confirmation_required', metric_id=temporary, **host)
+    admin.action('delete_metric', 200, 'metric_deleted', metric_id=temporary, confirm=1, **host)
+    admin.action('delete_subscription', 200, 'subscription_deleted', subscription_id=disposable, confirm=1, **host)
     print('PASS: authenticated packaged management acceptance')
 
 

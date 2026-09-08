@@ -22,6 +22,8 @@ if ($mode === 'prepare') {
     $denied_id = sql_save($user, 'user_auth');
     package_require($denied_id > 0, 'Cannot create restricted user');
     db_execute_prepared('DELETE FROM user_auth_realm WHERE user_id=?', array($denied_id));
+    // A user needs one Cacti realm to log in; grant only the console, not gNMI.
+    db_execute_prepared('INSERT INTO user_auth_realm (realm_id,user_id) VALUES (8,?)', array($denied_id));
     $host_id = (int)db_fetch_cell('SELECT id FROM host ORDER BY id LIMIT 1');
     package_require($host_id > 0, 'Missing disposable host');
     package_require((int)db_fetch_cell('SELECT COUNT(*) FROM plugin_gnmi_devices') === 0,
