@@ -166,6 +166,11 @@ function gnmi_validate_form_input($post_data) {
 		$errors[] = 'Compatibility Mode is invalid';
 	}
 
+	$tls_cipher_policy = $post_data['tls_cipher_policy'] ?? 'default';
+	if (!in_array($tls_cipher_policy, ['default', 'legacy_compatibility'], true)) {
+		$errors[] = 'TLS Cipher Policy is invalid';
+	}
+
 	// This module is loaded directly by Cacti's host-save hook and by standalone
 	// harnesses. Load the shared path guard at the point it is needed instead of
 	// relying on a particular plugin include order.
@@ -197,6 +202,17 @@ function gnmi_validate_form_input($post_data) {
  */
 function gnmi_normalize_compatibility_mode($value) {
 	return ($value === 'ciena_saos10') ? 'ciena_saos10' : 'standard';
+}
+
+/**
+ * Normalize the vendor-neutral TLS cipher policy to an allowlisted value.
+ * Unknown or missing values always retain gRPC's secure defaults.
+ *
+ * @param mixed $value Submitted or stored TLS cipher policy.
+ * @return string 'default' or 'legacy_compatibility'.
+ */
+function gnmi_normalize_tls_cipher_policy($value) {
+	return ($value === 'legacy_compatibility') ? 'legacy_compatibility' : 'default';
 }
 
 /**
@@ -275,6 +291,7 @@ function gnmi_detect_config_changes($existing_device, $post_data) {
 		'client_cert_path' => 'client_cert_path',
 		'tls_override' => 'tls_override',
 		'skip_verify' => 'skip_verify',
+		'tls_cipher_policy' => 'tls_cipher_policy',
 		'collection_interval' => 'collection_interval',
 		'compatibility_mode' => 'compatibility_mode',
 		'encoding' => 'encoding'
@@ -297,6 +314,9 @@ function gnmi_detect_config_changes($existing_device, $post_data) {
 		} elseif ($db_field === 'compatibility_mode') {
 			$old_value = gnmi_normalize_compatibility_mode($old_value);
 			$new_value = gnmi_normalize_compatibility_mode($new_value);
+		} elseif ($db_field === 'tls_cipher_policy') {
+			$old_value = gnmi_normalize_tls_cipher_policy($old_value);
+			$new_value = gnmi_normalize_tls_cipher_policy($new_value);
 		} else {
 			// String fields - trim for comparison
 			$old_value = trim($old_value);
@@ -413,6 +433,7 @@ function gnmi_process_device_save($host_id) {
 		'client_cert_path' => sanitize_search_string($_POST['client_cert_path'] ?? ''),
 		'tls_override' => sanitize_search_string($_POST['tls_override'] ?? ''),
 		'skip_verify' => isset($_POST['skip_verify']) ? 1 : 0,
+		'tls_cipher_policy' => gnmi_normalize_tls_cipher_policy($_POST['tls_cipher_policy'] ?? 'default'),
 		'collection_interval' => intval($_POST['collection_interval'] ?? 10),
 		'compatibility_mode' => gnmi_normalize_compatibility_mode($_POST['compatibility_mode'] ?? 'standard'),
 		'encoding' => $resolved_post_data['encoding']
@@ -426,7 +447,7 @@ function gnmi_process_device_save($host_id) {
 		$update_sql = 'UPDATE plugin_gnmi_devices SET ' .
 			'enabled = ?, hostname = ?, hostname_source = ?, port = ?, username = ?, password = ?, ' .
 			'use_tls = ?, ca_cert_path = ?, client_key_path = ?, ' .
-			'client_cert_path = ?, tls_override = ?, skip_verify = ?, compatibility_mode = ?, ' .
+			'client_cert_path = ?, tls_override = ?, skip_verify = ?, tls_cipher_policy = ?, compatibility_mode = ?, ' .
 			'collection_interval = ?, encoding = ?, modified_on = NOW() ' .
 			'WHERE host_id = ?';
 
@@ -443,6 +464,7 @@ function gnmi_process_device_save($host_id) {
 			$gnmi_settings['client_cert_path'],
 			$gnmi_settings['tls_override'],
 			$gnmi_settings['skip_verify'],
+			$gnmi_settings['tls_cipher_policy'],
 			$gnmi_settings['compatibility_mode'],
 			$gnmi_settings['collection_interval'],
 			$gnmi_settings['encoding'],
@@ -479,9 +501,9 @@ function gnmi_process_device_save($host_id) {
 		// INSERT new record into consolidated table
 		$insert_sql = 'INSERT INTO plugin_gnmi_devices (' .
 			'host_id, enabled, hostname, hostname_source, port, username, password, ' .
-			'use_tls, ca_cert_path, client_key_path, client_cert_path, tls_override, skip_verify, compatibility_mode, ' .
+			'use_tls, ca_cert_path, client_key_path, client_cert_path, tls_override, skip_verify, tls_cipher_policy, compatibility_mode, ' .
 			'collection_interval, encoding, created_on' .
-			') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())';
+			') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())';
 
 		db_execute_prepared($insert_sql, array(
 			$gnmi_settings['host_id'],
@@ -497,6 +519,7 @@ function gnmi_process_device_save($host_id) {
 			$gnmi_settings['client_cert_path'],
 			$gnmi_settings['tls_override'],
 			$gnmi_settings['skip_verify'],
+			$gnmi_settings['tls_cipher_policy'],
 			$gnmi_settings['compatibility_mode'],
 			$gnmi_settings['collection_interval'],
 			$gnmi_settings['encoding']
@@ -589,9 +612,13 @@ function gnmi_render_device_form_section($host_id, $gnmi_settings = [], $metric_
 		'client_cert_path' => '',
 		'tls_override' => '',
 		'skip_verify' => 0,
+		'tls_cipher_policy' => 'default',
 		'compatibility_mode' => 'standard',
 		'collection_interval' => 10,
 	], $gnmi_settings);
+	$gnmi_settings['tls_cipher_policy'] = gnmi_normalize_tls_cipher_policy(
+		$gnmi_settings['tls_cipher_policy']
+	);
 
 	$resolved_hostname = gnmi_resolve_hostname(
 		$gnmi_settings['hostname_source'],
@@ -805,6 +832,19 @@ function gnmi_render_device_form_section($host_id, $gnmi_settings = [], $metric_
 		</td>
 		<td>
 			<span class="textInfo" style="color: #ff0000;">Not recommended for production</span>
+		</td>
+	</tr>
+
+	<tr class="gnmi-setting-row tls-setting-row" style="<?php echo $gnmi_display; ?> <?php echo $tls_display; ?>">
+		<td class="textEditTitle" style="padding-left: 30px;">
+			<label for="tls_cipher_policy">TLS Cipher Policy</label>
+		</td>
+		<td>
+			<select id="tls_cipher_policy" name="tls_cipher_policy">
+				<option value="default" <?php echo ($gnmi_settings['tls_cipher_policy'] === 'default') ? 'selected' : ''; ?>>gRPC defaults (recommended)</option>
+				<option value="legacy_compatibility" <?php echo ($gnmi_settings['tls_cipher_policy'] === 'legacy_compatibility') ? 'selected' : ''; ?>>Legacy TLS compatibility</option>
+			</select>
+			<span class="textInfo" style="color:#ff6600;">Legacy mode permits an older TLS 1.2 CBC/SHA-1 cipher. Certificate verification and mTLS remain enabled.</span>
 		</td>
 	</tr>
 
@@ -1033,27 +1073,16 @@ function gnmi_render_device_form_section($host_id, $gnmi_settings = [], $metric_
 
 	function gnmi_restart_daemon(host_id) {
 		if (confirm('Restart the gNMI daemon for this device? Active connections will be briefly interrupted.')) {
-			var formData = new FormData();
-			formData.append('action', 'restart_daemon');
-			formData.append('host_id', host_id);
+			if (typeof gnmi_ajax_request !== 'function') {
+				alert('The gNMI management interface is not available. Save the device configuration and reload the page.');
+				return;
+			}
 
-			var csrfToken = document.querySelector('input[name="__csrf_magic"]');
-			if (csrfToken) formData.append('__csrf_magic', csrfToken.value);
-
-			fetch('plugins/gnmi/ajax_handler.php', {
-				method: 'POST',
-				body: formData,
-				credentials: 'include'
+			gnmi_ajax_request('restart_daemon', {})
+			.then(function() {
+				alert('Daemon restart initiated successfully.');
 			})
-			.then(response => response.json())
-			.then(data => {
-				if (data.success) {
-					alert('Daemon restart initiated successfully.');
-				} else {
-					alert('Failed to restart daemon: ' + (data.message || 'Unknown error'));
-				}
-			})
-			.catch(error => {
+			.catch(function(error) {
 				console.error('gNMI: restart daemon error:', error);
 				alert('Error restarting daemon: ' + error.message);
 			});
@@ -1097,6 +1126,7 @@ function gnmi_render_device_form_section($host_id, $gnmi_settings = [], $metric_
 		fd.append('client_cert_path', fv('client_cert_path'));
 		fd.append('tls_override',     fv('tls_override'));
 		fd.append('skip_verify',      fv('skip_verify'));
+		fd.append('tls_cipher_policy', fv('tls_cipher_policy'));
 		fd.append('compatibility_mode', fv('compatibility_mode'));
 
 		var csrf = document.querySelector('input[name="__csrf_magic"]');

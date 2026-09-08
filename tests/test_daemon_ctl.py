@@ -135,7 +135,41 @@ def test_start_writes_private_config_and_launches_daemon(controller, monkeypatch
     assert command[command.index("--device-id") + 1] == "8"
     assert command[command.index("--config-file") + 1] == str(config_file)
     assert popen.call_args.kwargs["start_new_session"] is True
+    assert "GRPC_SSL_CIPHER_SUITES" not in popen.call_args.kwargs["env"]
     assert "PID: 456" in capsys.readouterr().out
+
+
+def test_start_scopes_legacy_cipher_policy_to_child_environment(controller, monkeypatch):
+    running = iter([False, True])
+    monkeypatch.setattr(controller, "is_running", lambda device_id: next(running))
+    monkeypatch.setattr(controller, "read_pid", lambda device_id: 456)
+    monkeypatch.setattr(controller, "runtime_ready", lambda: True)
+    monkeypatch.setattr(ctl.time, "sleep", lambda seconds: None)
+    popen = Mock(return_value=Mock())
+    monkeypatch.setattr(ctl.subprocess, "Popen", popen)
+    monkeypatch.setenv("GRPC_SSL_CIPHER_SUITES", "parent-value")
+
+    assert controller.start(8, config={
+        "hostname": "router",
+        "use_tls": True,
+        "tls_cipher_policy": "legacy_compatibility",
+    }) is True
+
+    assert popen.call_args.kwargs["env"]["GRPC_SSL_CIPHER_SUITES"] == (
+        "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA"
+    )
+    assert os.environ["GRPC_SSL_CIPHER_SUITES"] == "parent-value"
+
+
+def test_start_rejects_unknown_tls_cipher_policy(controller, monkeypatch, capsys):
+    monkeypatch.setattr(controller, "is_running", lambda device_id: False)
+    monkeypatch.setattr(controller, "runtime_ready", lambda: True)
+
+    assert controller.start(8, config={
+        "hostname": "router",
+        "tls_cipher_policy": "arbitrary",
+    }) is False
+    assert "Invalid tls_cipher_policy" in capsys.readouterr().err
 
 
 def test_start_reports_launch_and_verification_failures(controller, monkeypatch, capsys):
@@ -143,13 +177,23 @@ def test_start_reports_launch_and_verification_failures(controller, monkeypatch,
     monkeypatch.setattr(ctl.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(controller, "is_running", Mock(side_effect=[False, False]))
     monkeypatch.setattr(ctl.subprocess, "Popen", lambda *args, **kwargs: Mock())
-    assert controller.start(1, config_file="config.json") is False
+    config_file = controller.storage_dir / "config.json"
+    config_file.write_text('{}')
+    assert controller.start(1, config_file=str(config_file)) is False
     assert "failed to start" in capsys.readouterr().err
 
     monkeypatch.setattr(controller, "is_running", lambda device_id: False)
     monkeypatch.setattr(ctl.os, "open", Mock(side_effect=OSError("no log")))
-    assert controller.start(1, config_file="config.json") is False
+    assert controller.start(1, config_file=str(config_file)) is False
     assert "no log" in capsys.readouterr().err
+
+
+def test_start_rejects_unreadable_config_file(controller, monkeypatch, capsys):
+    monkeypatch.setattr(controller, "is_running", lambda device_id: False)
+    monkeypatch.setattr(controller, "runtime_ready", lambda: True)
+
+    assert controller.start(1, config_file="missing.json") is False
+    assert "Error reading daemon configuration" in capsys.readouterr().err
 
 
 def test_stop_handles_not_running_and_missing_pid(controller, monkeypatch):

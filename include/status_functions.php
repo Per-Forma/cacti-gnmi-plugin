@@ -173,6 +173,7 @@ function gnmi_get_dashboard_summary() {
 			d.id as device_id,
 			d.host_id,
 			d.hostname,
+			d.tls_cipher_policy,
 			d.last_poll_time,
 			d.last_poll_status,
 			d.last_error_message,
@@ -213,6 +214,9 @@ function gnmi_get_dashboard_summary() {
 			'device_id' => $device_id,
 			'host_id' => $device['host_id'],
 			'hostname' => $device['hostname'],
+			'tls_cipher_policy' => (($device['tls_cipher_policy'] ?? 'default') === 'legacy_compatibility')
+				? 'legacy_compatibility'
+				: 'default',
 			'device_description' => $device['device_description'] ?: 'N/A',
 			'daemon_status' => $daemon_status,
 			'daemon_pid' => $daemon_pid,

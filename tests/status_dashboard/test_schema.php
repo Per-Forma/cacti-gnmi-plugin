@@ -75,7 +75,7 @@ function test_current_schema_columns() {
 		'plugin_gnmi_devices' => array(
 			'id', 'host_id', 'enabled', 'hostname', 'hostname_source', 'port',
 			'username', 'password', 'use_tls', 'compatibility_mode', 'ca_cert_path',
-			'client_key_path', 'client_cert_path', 'tls_override', 'skip_verify',
+			'client_key_path', 'client_cert_path', 'tls_override', 'skip_verify', 'tls_cipher_policy',
 			'collection_interval', 'encoding', 'last_poll_time', 'last_poll_status',
 			'last_error_message', 'created_on', 'modified_on',
 		),
@@ -125,6 +125,7 @@ function test_current_schema_column_contracts() {
 	$enums = array(
 		array('plugin_gnmi_devices', 'hostname_source', "enum('device','custom')"),
 		array('plugin_gnmi_devices', 'compatibility_mode', "enum('standard','ciena_saos10')"),
+		array('plugin_gnmi_devices', 'tls_cipher_policy', "enum('default','legacy_compatibility')"),
 		array('plugin_gnmi_subscriptions', 'discovery_mode', "enum('manual','discovered','template')"),
 		array('plugin_gnmi_subscriptions', 'discovery_status', "enum('pending','success','failed')"),
 		array('plugin_gnmi_metrics', 'rrd_type', "enum('counter','gauge','derive','absolute')"),
@@ -142,6 +143,7 @@ function test_current_schema_column_contracts() {
 		array('plugin_gnmi_devices', 'port', '9339'),
 		array('plugin_gnmi_devices', 'use_tls', '1'),
 		array('plugin_gnmi_devices', 'compatibility_mode', 'standard'),
+		array('plugin_gnmi_devices', 'tls_cipher_policy', 'default'),
 		array('plugin_gnmi_devices', 'skip_verify', '0'),
 		array('plugin_gnmi_devices', 'collection_interval', '10'),
 		array('plugin_gnmi_devices', 'encoding', 'JSON_IETF'),

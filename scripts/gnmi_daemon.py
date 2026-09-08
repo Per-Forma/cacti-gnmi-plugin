@@ -41,11 +41,19 @@ from typing import Dict, Optional, Any, Deque, List, Set
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gnmi_runtime import chmod_private_file, ensure_private_dir, storage_dir as default_storage_dir
-from gnmi_collector.pygnmi_patch import patch_pygnmi_for_ciena
+from gnmi_tls import (
+    apply_tls_cipher_policy,
+    tls_cipher_policy_label,
+    validate_tls_cipher_policy,
+)
 
-# Standard pygnmi behavior is the default. The Ciena patch is applied later,
-# per daemon process, only when compatibility_mode explicitly requests it.
-from pygnmi.client import gNMIclient, telemetryParser
+# gRPC reads GRPC_SSL_CIPHER_SUITES while its native runtime initializes.  Keep
+# these imports lazy so direct gnmi_daemon.py invocation can apply the selected
+# per-device policy before importing pygnmi/grpc.  gnmi_daemon_ctl.py also sets
+# the child environment before exec, providing the same guarantee normally.
+gNMIclient = None
+telemetryParser = None
+patch_pygnmi_for_ciena = None
 
 # Configure logging
 logging.basicConfig(
@@ -53,6 +61,27 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('gnmi_daemon')
+
+
+def initialize_gnmi_runtime(config: Dict[str, Any]) -> str:
+    """Apply TLS policy before the first pygnmi/grpc import in this process."""
+    global gNMIclient, telemetryParser, patch_pygnmi_for_ciena
+
+    policy = apply_tls_cipher_policy(
+        os.environ,
+        config.get('tls_cipher_policy', 'default'),
+        use_tls=bool(config.get('use_tls', not config.get('insecure', False))),
+    )
+
+    if gNMIclient is None:
+        from gnmi_collector.pygnmi_patch import patch_pygnmi_for_ciena as ciena_patch
+        from pygnmi.client import gNMIclient as client_class, telemetryParser as parser
+
+        gNMIclient = client_class
+        telemetryParser = parser
+        patch_pygnmi_for_ciena = ciena_patch
+
+    return policy
 
 
 def _telemetry_leaf_name(path: Any) -> str:
@@ -129,6 +158,8 @@ def load_config(config_json: str) -> Dict[str, Any]:
     compatibility_mode = config.get('compatibility_mode', 'standard')
     if compatibility_mode not in ('standard', 'ciena_saos10'):
         raise ValueError(f"Invalid compatibility_mode: {compatibility_mode}")
+
+    validate_tls_cipher_policy(config.get('tls_cipher_policy', 'default'))
 
     # Validate subscriptions is non-empty array
     if not isinstance(config['subscriptions'], list) or len(config['subscriptions']) == 0:
@@ -408,7 +439,7 @@ class GNMIDaemon:
         self.running = False
         self.shutdown_event = Event()
         self._shutdown_complete = False
-        self.gnmi_client: Optional[gNMIclient] = None
+        self.gnmi_client: Optional[Any] = None
         self.backoff = ExponentialBackoff()
         # Compute per-instance buffer capacity from poller interval (falls back to 300s default).
         # Formula: ceil((poller_interval * 1.5) / sample_interval), clamped [4, 120].
@@ -529,6 +560,7 @@ class GNMIDaemon:
                 "subscription_start": datetime.fromtimestamp(self.connection_start_time, timezone.utc).isoformat() if self.connection_start_time else None,
                 "error_count": self.error_count,
                 "last_error": self.last_error,
+                "tls_cipher_policy": self.config.get('tls_cipher_policy', 'default'),
                 "rejected_subscription_paths": sorted(self._rejected_subscription_paths),
                 "unmatched_instance_count": self.unmatched_instance_count,
                 "metric_groups": metric_groups if metric_groups else {},
@@ -770,6 +802,12 @@ class GNMIDaemon:
         try:
             logger.info(f"Connecting to {self.config['hostname']}:{self.config['port']}")
             self.connection_status = "connecting"
+
+            tls_cipher_policy = initialize_gnmi_runtime(self.config)
+            logger.info(
+                "TLS cipher policy: %s",
+                tls_cipher_policy_label(tls_cipher_policy),
+            )
 
             if self.config.get('compatibility_mode', 'standard') == 'ciena_saos10':
                 patch_pygnmi_for_ciena()

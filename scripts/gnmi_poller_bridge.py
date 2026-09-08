@@ -808,7 +808,13 @@ def main():
         # Check daemon status
         daemon_status = data.get('daemon_status', 'unknown')
         if daemon_status != 'connected':
-            logger.warning(f"Daemon not connected: status={daemon_status}")
+            last_error = str(data.get('last_error') or '').replace('\n', ' ')[:300]
+            tls_policy = data.get('tls_cipher_policy', 'default')
+            detail = f", last_error={last_error}" if last_error else ""
+            logger.warning(
+                f"Daemon not connected: status={daemon_status}, "
+                f"tls_cipher_policy={tls_policy}{detail}"
+            )
             sys.exit(2)  # Not connected - no valid data
 
         # History output mode - output all buffered samples with timestamps

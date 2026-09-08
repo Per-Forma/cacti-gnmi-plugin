@@ -46,7 +46,12 @@ function gnmi_render_summary_table($devices) {
 		$html .= '<td>' . html_escape($device['device_description']) . '</td>';
 
 		// Hostname
-		$html .= '<td>' . html_escape($device['hostname']) . '</td>';
+		$html .= '<td>' . html_escape($device['hostname']);
+		if (($device['tls_cipher_policy'] ?? 'default') === 'legacy_compatibility') {
+			$html .= ' <span title="Legacy TLS compatibility is enabled" '
+				. 'style="color:#8a4b08;font-weight:bold;">Legacy TLS</span>';
+		}
+		$html .= '</td>';
 
 		// Health badge
 		$html .= '<td>' . gnmi_render_health_badge($device['health']) . '</td>';
@@ -166,6 +171,10 @@ function gnmi_render_device_detail($device) {
 	$html .= '<tr><td><strong>Data Age:</strong></td><td>' . ($stats['data_age_seconds'] !== null ? $stats['data_age_seconds'] . 's' : 'No data') . '</td></tr>';
 	$html .= '<tr><td><strong>JSON File Size:</strong></td><td>' . $stats['json_file_size_kb'] . ' KB</td></tr>';
 	$html .= '<tr><td><strong>Log File Size:</strong></td><td>' . $stats['log_file_size_kb'] . ' KB (' . $stats['log_line_count'] . ' lines)</td></tr>';
+	$tls_policy_label = (($device['tls_cipher_policy'] ?? 'default') === 'legacy_compatibility')
+		? 'Legacy TLS compatibility'
+		: 'gRPC defaults';
+	$html .= '<tr><td><strong>TLS Cipher Policy:</strong></td><td>' . html_escape($tls_policy_label) . '</td></tr>';
 	$html .= '</table>';
 
 	// Section 2: Recent Events

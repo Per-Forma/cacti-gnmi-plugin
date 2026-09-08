@@ -14,7 +14,7 @@
 require_once('/var/www/html/cacti/include/global.php');
 require_once('/var/www/html/cacti/lib/database.php');
 require_once('/var/www/html/cacti/plugins/gnmi/include/subscription_functions.php');
-require_once('/var/www/html/cacti/plugins/gnmi/pages/subscription_actions.php');
+require_once('/var/www/html/cacti/plugins/gnmi/include/subscription_actions.php');
 require_once('/var/www/html/cacti/plugins/gnmi/include/subscription_display.php');
 require_once('/var/www/html/cacti/plugins/gnmi/include/functions.php');
 
@@ -339,17 +339,17 @@ class TestUIStubs {
     // =========================================================================
 
     /**
-     * Test 11: 'restart_daemon' appears in the ajax_handler.php action whitelist
+     * Test 11: 'restart_daemon' appears in the centralized action whitelist
      */
     public function testRestartDaemonWhitelisted() {
-        $handler_path = '/var/www/html/cacti/plugins/gnmi/ajax_handler.php';
+        $handler_path = '/var/www/html/cacti/plugins/gnmi/include/subscription_actions.php';
         if (!file_exists($handler_path)) {
-            throw new Exception("ajax_handler.php not found at $handler_path");
+            throw new Exception("subscription_actions.php not found at $handler_path");
         }
 
         $contents = file_get_contents($handler_path);
         if (strpos($contents, "'restart_daemon'") === false) {
-            throw new Exception("'restart_daemon' not found in ajax_handler.php whitelist — not yet wired");
+            throw new Exception("'restart_daemon' not found in centralized action whitelist");
         }
         return true;
     }

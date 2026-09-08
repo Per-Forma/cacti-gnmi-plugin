@@ -67,6 +67,7 @@ The core daemon process that manages gNMI subscriptions.
   "use_tls": true,
   "insecure": false,
   "skip_verify": true,
+  "tls_cipher_policy": "default",
   "compatibility_mode": "standard",
   "encoding": "JSON_IETF",
   "subscription_mode": "STREAM",
@@ -77,6 +78,11 @@ The core daemon process that manages gNMI subscriptions.
 `compatibility_mode` defaults to `standard`. Use `ciena_saos10` only for an
 affected Ciena SAOS 10.x device; it bypasses Capabilities and tolerates the
 device's `None` subscription responses. `JSON_IETF` is sent as `json_ietf`.
+
+`tls_cipher_policy` is independent of vendor protocol compatibility. It
+defaults to `default`; select `legacy_compatibility` only for a target whose
+TLS service cannot negotiate gRPC's defaults. The daemon controller applies
+that policy only to the selected device process.
 
 ### 2. `gnmi_daemon_ctl.py` - Control Script
 

@@ -9,7 +9,7 @@ sources, RRD files, graphs, and operational dashboards.
 
 ## Project status
 
-**Version:** 1.0.0-beta.1
+**Version:** 1.0.0-beta.3
 
 This is a functionally complete public beta intended for fresh test
 installations. Do not install it over an earlier private or development build.

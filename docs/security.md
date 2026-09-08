@@ -53,6 +53,7 @@ Advanced** section of the device edit form.
 | `client_key_path` | Client private key (mTLS). |
 | `tls_override` | TLS server-name override — the name to validate the server cert against (use when the cert CN/SAN differs from the connection IP/host). |
 | `skip_verify` | Disable server certificate verification. **Insecure — see below.** |
+| `tls_cipher_policy` | Per-device gRPC cipher policy. `default` is recommended; `legacy_compatibility` permits an older TLS 1.2 CBC/SHA-1 cipher. |
 
 Certificate/key fields are optional, but blank fields remain blank. The daemon
 does **not** fall back to bundled sample certificates or private keys. Place lab
@@ -70,6 +71,10 @@ Paths outside the protected runtime certificate directory are rejected.
 - **`skip_verify` (lab only):** disables certificate validation, which removes
   protection against man-in-the-middle attacks. Acceptable for a closed lab; do
   **not** use it on a production or shared network.
+- **Legacy TLS compatibility:** keeps certificate validation and mTLS active,
+  but adds `ECDHE-RSA-AES128-SHA` after a modern cipher. Enable it only for a
+  target that cannot negotiate gRPC defaults, and prefer modernizing the
+  target's TLS profile.
 
 ### Certificate handling
 

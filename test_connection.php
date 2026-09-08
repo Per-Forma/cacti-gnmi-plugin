@@ -3,7 +3,7 @@
  * gNMI Connection Test — streaming endpoint.
  *
  * Accepts POST with current form values (including unsaved changes), writes a
- * temp config JSON, invokes gnmi_connection_test.py via proc_open, and streams
+ * temp config JSON, invokes gnmi_connection_test.py via popen, and streams
  * NDJSON output line-by-line so the browser receives each stage result as it
  * completes.
  *
@@ -69,6 +69,9 @@ $client_key   = trim($_POST['client_key_path']  ?? '');
 $client_cert  = trim($_POST['client_cert_path'] ?? '');
 $tls_override = trim($_POST['tls_override']     ?? '');
 $skip_verify  = (($_POST['skip_verify']  ?? '0') === '1');
+$tls_cipher_policy = (($_POST['tls_cipher_policy'] ?? 'default') === 'legacy_compatibility')
+    ? 'legacy_compatibility'
+    : 'default';
 $compatibility_mode = (($_POST['compatibility_mode'] ?? 'standard') === 'ciena_saos10')
     ? 'ciena_saos10'
     : 'standard';
@@ -112,6 +115,7 @@ file_put_contents($tmp, json_encode([
     'client_cert_path'  => $client_cert,
     'tls_override'      => $tls_override,
     'skip_verify'       => $skip_verify,
+    'tls_cipher_policy' => $tls_cipher_policy,
     'compatibility_mode'=> $compatibility_mode,
 ]));
 
@@ -131,15 +135,27 @@ if (!file_exists($python)) {
 
 // ── Launch Python script and stream stdout ────────────────────────────────────
 // Use popen (simpler than proc_open — avoids multi-pipe descriptor management issues).
-// Redirect stderr to /dev/null; Python uses flush=True so stdout arrives line by line.
+$stderr_tmp = tempnam(sys_get_temp_dir(), 'gnmi_test_stderr_');
+if ($stderr_tmp === false) {
+    unlink($tmp);
+    echo json_encode(['stage' => 'error', 'success' => false,
+                      'message' => 'Cannot create diagnostic temp file', 'duration_ms' => 0]) . "\n";
+    ob_flush(); flush();
+    exit;
+}
+chmod($stderr_tmp, 0600);
+
+// Keep native gRPC diagnostics out of the streamed NDJSON response, but retain
+// a bounded, redacted copy in the Cacti log when the helper emits stderr.
 $cmd = escapeshellarg($python) . ' -u ' .
        escapeshellarg($script) . ' ' .
-       escapeshellarg($tmp) . ' 2>/dev/null';
+       escapeshellarg($tmp) . ' 2>' . escapeshellarg($stderr_tmp);
 
 $handle = popen($cmd, 'r');
 
 if ($handle === false) {
     unlink($tmp);
+    unlink($stderr_tmp);
     echo json_encode(['stage' => 'error', 'success' => false,
                       'message' => 'Failed to launch test script', 'duration_ms' => 0]) . "\n";
     ob_flush(); flush();
@@ -156,5 +172,22 @@ while (!feof($handle)) {
     }
 }
 
-pclose($handle);
+$exit_code = pclose($handle);
+$native_stderr = file_get_contents($stderr_tmp);
+if ($exit_code !== 0 && is_string($native_stderr) && trim($native_stderr) !== '') {
+    foreach ([$password, $username, $tmp, $stderr_tmp] as $sensitive_value) {
+        if ($sensitive_value !== '') {
+            $native_stderr = str_replace($sensitive_value, '[redacted]', $native_stderr);
+        }
+    }
+    $native_stderr = str_replace(["\r", "\n", "\t"], ' ', $native_stderr);
+    $native_stderr = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $native_stderr);
+    $native_stderr = substr(trim($native_stderr), 0, 4000);
+    cacti_log(
+        'gNMI: Connection test native diagnostics (exit ' . (int)$exit_code . '): ' . $native_stderr,
+        false,
+        'PLUGIN'
+    );
+}
 unlink($tmp);
+unlink($stderr_tmp);

@@ -8,7 +8,7 @@
 function plugin_gnmi_version() {
 	return array(
 		'name'        => 'gNMI Telemetry',
-		'version'     => '1.0.0-beta.1',
+		'version'     => '1.0.0-beta.3',
 		'longname'    => 'gNMI Telemetry Collection for Cacti',
 		'author'      => 'Jarred Masterson',
 		'homepage'    => 'https://github.com/Per-Forma/cacti-gnmi-plugin',
@@ -22,7 +22,7 @@ function plugin_gnmi_version() {
 function plugin_gnmi_config() {
 	return array(
 		'name' => 'gNMI Telemetry',
-		'version' => '1.0.0-beta.1',
+		'version' => '1.0.0-beta.3',
 		'author' => 'Jarred Masterson',
 		'homepage' => 'https://github.com/Per-Forma/cacti-gnmi-plugin',
 		'email' => 'jarred.masterson@gmail.com',
@@ -46,8 +46,6 @@ function plugin_init_gnmi() {
 	// so our fields land naturally inside #host_form without DOM relocation.
 	$plugin_hooks['device_edit_pre_bottom']['gnmi'] = 'gnmi_extend_device_edit_form';
 	$plugin_hooks['host_save']['gnmi'] = 'gnmi_save_device_form';
-	// Phase 3.3: Subscription actions processing
-	$plugin_hooks['host_edit_top']['gnmi'] = 'gnmi_process_subscription_actions';
 }
 
 function gnmi_config_arrays() {
@@ -245,7 +243,6 @@ function plugin_gnmi_install() {
 		array('hook' => 'poller_bottom', 'function' => 'gnmi_poller_bottom'),
 		array('hook' => 'device_edit_pre_bottom', 'function' => 'gnmi_extend_device_edit_form'),
 		array('hook' => 'host_save', 'function' => 'gnmi_save_device_form'),
-		array('hook' => 'host_edit_top', 'function' => 'gnmi_process_subscription_actions'),
 	);
 
 	foreach ($hooks as $hook) {
@@ -262,6 +259,10 @@ function plugin_gnmi_install() {
 			cacti_log("gNMI Plugin: Registered hook '{$hook['hook']}' -> '{$hook['function']}' (inactive until plugin enabled)", false, 'INSTALL', POLLER_VERBOSITY_MEDIUM);
 		}
 	}
+
+	// Subscription mutations are handled only by ajax_handler.php. Remove the
+	// obsolete hook if this install follows an interrupted prerelease upgrade.
+	gnmi_remove_legacy_subscription_action_hook();
 
 	// Register plugin pages/realms for access control
 	// This allows Cacti to manage permissions for plugin pages
@@ -292,6 +293,7 @@ function plugin_gnmi_install() {
 		`client_cert_path` varchar(255) COMMENT 'Path to client certificate file (for mTLS)',
 		`tls_override` varchar(255) COMMENT 'Override server name for certificate validation (lab environments)',
 		`skip_verify` boolean NOT NULL DEFAULT FALSE COMMENT 'Skip TLS certificate verification (NOT recommended for production)',
+		`tls_cipher_policy` ENUM('default','legacy_compatibility') NOT NULL DEFAULT 'default' COMMENT 'Per-device gRPC TLS cipher policy',
 		`collection_interval` int(5) unsigned NOT NULL DEFAULT 10 COMMENT 'Collection interval in seconds (must align with Cacti poll interval)',
 		`encoding` varchar(50) NOT NULL DEFAULT 'JSON_IETF' COMMENT 'gNMI encoding format (JSON_IETF, PROTO, etc)',
 		`last_poll_time` timestamp NULL DEFAULT NULL COMMENT 'Last successful poll timestamp',
@@ -474,6 +476,7 @@ function plugin_gnmi_install() {
 	// Device hostname inheritance and Phase 3.4 schema additions.
 	gnmi_apply_hostname_source_schema();
 	gnmi_apply_compatibility_mode_schema();
+	gnmi_apply_tls_cipher_policy_schema();
 	gnmi_apply_schema_34();
 
 	return true;
@@ -675,6 +678,37 @@ function gnmi_apply_compatibility_mode_schema() {
 		}
 
 		cacti_log('gNMI: Added compatibility_mode column with standard gNMI behavior as the default', false, 'INSTALL', POLLER_VERBOSITY_MEDIUM);
+	}
+
+	return true;
+}
+
+/**
+ * Add the vendor-neutral per-device TLS cipher policy selector.
+ *
+ * Existing devices retain gRPC's secure defaults. Operators must explicitly
+ * opt a target into the legacy compatibility cipher allowance.
+ *
+ * @return bool True on success.
+ */
+function gnmi_apply_tls_cipher_policy_schema() {
+	$cols = db_fetch_assoc('DESCRIBE plugin_gnmi_devices');
+	if (!is_array($cols)) {
+		return false;
+	}
+
+	$col_names = array_column($cols, 'Field');
+	if (!in_array('tls_cipher_policy', $col_names, true)) {
+		$result = db_execute("ALTER TABLE plugin_gnmi_devices
+			ADD COLUMN tls_cipher_policy ENUM('default','legacy_compatibility') NOT NULL DEFAULT 'default'
+			COMMENT 'Per-device gRPC TLS cipher policy'
+			AFTER skip_verify");
+		if ($result === false) {
+			cacti_log('gNMI: Failed to add tls_cipher_policy column: ' . db_fetch_error(), false, 'INSTALL', POLLER_VERBOSITY_LOW);
+			return false;
+		}
+
+		cacti_log('gNMI: Added tls_cipher_policy column with secure gRPC defaults', false, 'INSTALL', POLLER_VERBOSITY_MEDIUM);
 	}
 
 	return true;
@@ -1150,9 +1184,26 @@ function plugin_gnmi_upgrade() {
 	// Apply schema additions (idempotent).
 	gnmi_apply_hostname_source_schema();
 	gnmi_apply_compatibility_mode_schema();
+	gnmi_apply_tls_cipher_policy_schema();
 	gnmi_apply_schema_34();
+	gnmi_remove_legacy_subscription_action_hook();
 
 	return true;
+}
+
+/**
+ * Remove the pre-beta.3 hook that attempted to process AJAX actions in host.php.
+ *
+ * The endpoint is now the only mutation entry point. This cleanup is safe on
+ * fresh installs and repeat upgrades.
+ *
+ * @return bool
+ */
+function gnmi_remove_legacy_subscription_action_hook() {
+	return db_execute_prepared(
+		"DELETE FROM plugin_hooks WHERE name = ? AND hook = ? AND function = ?",
+		array('gnmi', 'host_edit_top', 'gnmi_process_subscription_actions')
+	);
 }
 
 /**
@@ -1256,96 +1307,23 @@ function gnmi_save_device_form($args) {
 		include_once($config['base_path'] . '/plugins/gnmi/include/functions.php');
 	}
 
-	// Phase 3.3: Process subscription actions if present
-	if (isset($_POST['action']) && in_array($_POST['action'], ['add_subscription', 'add_metric', 'update_subscription', 'delete_subscription', 'update_metric', 'delete_metric', 'create_datasource', 'create_graph'])) {
-		// Include subscription functions
-		include_once($config['base_path'] . '/plugins/gnmi/include/subscription_functions.php');
-		include_once($config['base_path'] . '/plugins/gnmi/pages/subscription_actions.php');
-
-		// Process subscription action
-		gnmi_process_subscription_action();
-	}
-
 	// Process the save
 	gnmi_process_device_save($host_id);
 }
 
 /**
- * Process subscription actions (Phase 3.3)
+ * Ignore a cached pre-beta.3 subscription-action hook without mutating state.
  *
- * Called by Cacti's host_edit_top hook at the beginning of the device edit form.
- * This hook processes subscription actions before the main form is displayed.
- *
- * @param array $args - Array containing 'host_id' key with the device host_id
+ * @param array $args Legacy hook arguments (unused)
+ * @return void
  */
 function gnmi_process_subscription_actions($args) {
-	global $config;
-
-	if (!function_exists('gnmi_sanitized_post_for_log')) {
-		include_once($config['base_path'] . '/plugins/gnmi/include/functions.php');
-	}
-
-	// Debug: Log hook execution with detailed info
-	cacti_log('gNMI: host_edit_top hook called', false, 'PLUGIN', POLLER_VERBOSITY_DEBUG);
-	cacti_log('gNMI: Hook args: ' . print_r(gnmi_mask_sensitive_data($args), true), false, 'PLUGIN', POLLER_VERBOSITY_DEBUG);
-	cacti_log('gNMI: POST data: ' . gnmi_sanitized_post_for_log(), false, 'PLUGIN', POLLER_VERBOSITY_DEBUG);
-	cacti_log('gNMI: REQUEST method: ' . (isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : ''), false, 'PLUGIN', POLLER_VERBOSITY_DEBUG);
-	$request_path = isset($_SERVER['REQUEST_URI']) ? parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) : '';
-	cacti_log('gNMI: Current path: ' . $request_path, false, 'PLUGIN', POLLER_VERBOSITY_DEBUG);
-
-	// Check if this is a subscription action
-	if (!isset($_POST['action']) || !in_array($_POST['action'], ['add_subscription', 'add_metric', 'update_subscription', 'delete_subscription', 'update_metric', 'delete_metric', 'create_datasource', 'create_graph'])) {
-		cacti_log('gNMI: No subscription action found in POST data', false, 'PLUGIN', POLLER_VERBOSITY_DEBUG);
-		cacti_log('gNMI: Available POST keys: ' . implode(', ', array_keys($_POST)), false, 'PLUGIN', POLLER_VERBOSITY_DEBUG);
-		return;
-	}
-
-	// Extract host_id from the args array
-	$host_id = isset($args['host_id']) ? $args['host_id'] : 0;
-
-	if ($host_id == 0) {
-		cacti_log('gNMI: No host_id for subscription action processing', false, 'PLUGIN');
-		return;
-	}
-
-	// Log hook execution for debugging
-	cacti_log("gNMI: Processing subscription action '{$_POST['action']}' for host_id=$host_id", false, 'PLUGIN');
-
-	// Include subscription functions
-	include_once($config['base_path'] . '/plugins/gnmi/include/subscription_functions.php');
-	include_once($config['base_path'] . '/plugins/gnmi/pages/subscription_actions.php');
-
-	// Process subscription action
-	$result = gnmi_process_subscription_action();
-
-	// Check if this is an AJAX request
-	$is_ajax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest';
-
-	if ($result) {
-		cacti_log("gNMI: Subscription action '{$_POST['action']}' processed successfully", false, 'PLUGIN');
-
-		if ($is_ajax) {
-			// Return JSON for AJAX requests
-			header('Content-Type: application/json');
-			echo json_encode(['success' => true, 'message' => 'Subscription processed successfully']);
-			exit;
-		} else {
-			// Redirect for regular form submissions
-			header("Location: host.php?action=edit&id=" . $host_id . "&message=subscription_saved");
-			exit;
-		}
-	} else {
-		cacti_log("gNMI: Subscription action '{$_POST['action']}' failed", false, 'PLUGIN');
-
-		if ($is_ajax) {
-			// Return JSON for AJAX requests
-			header('Content-Type: application/json');
-			echo json_encode(['success' => false, 'message' => 'Failed to process subscription']);
-			exit;
-		} else {
-			// Redirect for regular form submissions
-			header("Location: host.php?action=edit&id=" . $host_id . "&message=subscription_error");
-			exit;
-		}
-	}
+	// Compatibility shim for a cached pre-beta.3 host_edit_top hook. Mutation
+	// requests are intentionally ignored; ajax_handler.php is the only entry.
+	cacti_log(
+		'gNMI: Ignored obsolete host_edit_top subscription action hook',
+		false,
+		'PLUGIN',
+		POLLER_VERBOSITY_DEBUG
+	);
 }

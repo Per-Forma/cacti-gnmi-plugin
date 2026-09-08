@@ -23,7 +23,7 @@ fi
 VERSION="${1:-}"
 if [ -z "$VERSION" ] || [ "$#" -ne 1 ]; then
 	echo "Usage: $0 [--allow-dirty] <version>" >&2
-	echo "Example: $0 1.0.0-beta.1" >&2
+	echo "Example: $0 1.0.0-beta.3" >&2
 	exit 2
 fi
 
@@ -124,7 +124,7 @@ for script_item in \
 	DAEMON_README.md README.md __init__.py analyze_daemon_logs.py \
 	check_data_continuity.py gnmi_connection_test.py gnmi_daemon.py \
 	gnmi_daemon_ctl.py gnmi_daemon_monitor.py gnmi_poller_bridge.py \
-	gnmi_runtime.py requirements.txt requirements-installed.txt; do
+	gnmi_runtime.py gnmi_tls.py requirements.txt requirements-installed.txt; do
 	cp "$PLUGIN_DIR/scripts/$script_item" "$PACKAGE_DIR/gnmi/scripts/"
 done
 cp -R "$PLUGIN_DIR/scripts/gnmi_collector/." "$PACKAGE_DIR/gnmi/scripts/gnmi_collector/"
@@ -145,7 +145,8 @@ fi
 
 for required_file in \
 	"LICENSE" "gnmi/LICENSE" "gnmi/INFO" "gnmi/setup.php" \
-	"gnmi/scripts/requirements.txt" "RELEASE_NOTES.md"; do
+	"gnmi/ajax_handler.php" "gnmi/include/subscription_actions.php" \
+	"gnmi/scripts/requirements.txt" "gnmi/scripts/gnmi_tls.py" "RELEASE_NOTES.md"; do
 	if [ ! -f "$PACKAGE_DIR/$required_file" ]; then
 		echo "ERROR: required package file is missing: $required_file" >&2
 		exit 1
@@ -155,7 +156,7 @@ done
 find "$PACKAGE_DIR/gnmi" -type d -name "__pycache__" -prune -exec rm -rf {} +
 find "$PACKAGE_DIR/gnmi" -type d -name ".pytest_cache" -prune -exec rm -rf {} +
 find "$PACKAGE_DIR/gnmi" -type d -name "htmlcov" -prune -exec rm -rf {} +
-find "$PACKAGE_DIR/gnmi" -type d -name "venv" -prune -exec rm -rf {} +
+find "$PACKAGE_DIR/gnmi" -type d \( -name "venv*" -o -name ".venv*" \) -prune -exec rm -rf {} +
 find "$PACKAGE_DIR/gnmi" -type d -name "runtime" -prune -exec rm -rf {} +
 find "$PACKAGE_DIR/gnmi" -type d -name "storage" -prune -exec rm -rf {} +
 find "$PACKAGE_DIR/gnmi" -type d -name "certs" -prune -exec rm -rf {} +
@@ -202,7 +203,7 @@ fi
 	shasum -a 256 -c CHECKSUMS.txt >/dev/null
 )
 
-FORBIDDEN_PATTERN='/(venv|runtime|htmlcov|\.pytest_cache|tests)/|\.rrd$|\.pem$|\.key$|\.crt$|\.p12$|\.pfx$|\.pyc$|requirements-dev\.txt$|gnmi_poller\.py$|validate_bridge_|validate_schema\.sql$|^gnmi/test_ajax\.php$|^gnmi/status_test\.php$|^gnmi/subscription_ajax\.php$|^gnmi/subscription_actions(_minimal)?\.php$'
+FORBIDDEN_PATTERN='/((\.)?venv([^/]*)?|runtime|htmlcov|\.pytest_cache|tests)/|\.rrd$|\.pem$|\.key$|\.crt$|\.p12$|\.pfx$|\.pyc$|requirements-dev\.txt$|gnmi_poller\.py$|validate_bridge_|validate_schema\.sql$|^gnmi/test_ajax\.php$|^gnmi/status_test\.php$|^gnmi/subscription_ajax\.php$|^gnmi/subscription_actions(_minimal)?\.php$'
 FORBIDDEN_FILE="/tmp/gnmi_release_forbidden.$$"
 if find "$PACKAGE_DIR" -type f | sed "s|$PACKAGE_DIR/||" | grep -E "$FORBIDDEN_PATTERN" >"$FORBIDDEN_FILE"; then
 	echo "ERROR: forbidden files detected in prerelease package:" >&2
