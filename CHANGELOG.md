@@ -7,23 +7,22 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.3] - Unreleased
+
 ### Added
 
-- Added an idempotent local-Docker bootstrap that verifies the gNMI Python
-  environment against the container interpreter and safely rebuilds stale or
-  incompatible dependencies before replacing the active virtualenv.
+- Added an idempotent local-Docker virtualenv bootstrap and hardened package
+  filtering for virtualenv variants and build remnants.
+- Added archive-driven Cacti acceptance with checksum verification, authenticated
+  management requests, and disable/uninstall/reinstall checks in CI.
+- Added an explicit per-subscription option for automatically creating missing
+  Cacti data sources for enabled metrics.
 
 ### Changed
 
-- Hardened prerelease packaging checks to reject virtualenv directories and
-  build remnants under common venv naming variants.
-
-## [1.0.0-beta.3] - 2026-08-20
-
-### Added
-
-- Added an explicit per-subscription option for automatically creating missing
-  Cacti data sources for enabled metrics.
+- Updated the runtime gRPC and protobuf pins and the recorded cffi and
+  cryptography versions through the pending maintenance pull requests.
+- Updated checkout, Python setup, dependency review, and CodeQL Actions.
 
 ### Fixed
 
