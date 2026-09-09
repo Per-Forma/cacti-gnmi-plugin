@@ -57,6 +57,40 @@ function gnmi_config_arrays() {
 	return array();
 }
 
+/** Cacti retains config_arrays hooks on disable, but has no disable callback. */
+function gnmi_register_shutdown_guard() {
+	static $registered = false;
+	if (!$registered) {
+		register_shutdown_function('gnmi_stop_disabled_plugin_daemons');
+		$registered = true;
+	}
+}
+
+/** Observe the final database state after either CLI or web plugin management. */
+function gnmi_stop_disabled_plugin_daemons() {
+	global $config;
+	// Do not use Cacti's cached plugin status: it predates this request's action.
+	$status = db_fetch_cell("SELECT status FROM plugin_config WHERE directory = 'gnmi'");
+	if ((int)$status !== 4 || !gnmi_poller_tables_available()) {
+		return;
+	}
+	if (!function_exists('gnmi_stop_daemon')) {
+		require_once($config['base_path'] . '/plugins/gnmi/include/functions.php');
+	}
+	gnmi_with_poller_exclusive_lock(function () {
+		// Serialize with an in-flight poller and recheck after obtaining the lock.
+		$status = db_fetch_cell("SELECT status FROM plugin_config WHERE directory = 'gnmi'");
+		if ((int)$status !== 4 || !gnmi_poller_tables_available()) {
+			return;
+		}
+		foreach (db_fetch_assoc('SELECT id FROM plugin_gnmi_devices') as $device) {
+			if (!gnmi_stop_daemon((int)$device['id'])) {
+				cacti_log('gNMI: Failed to stop collector after plugin disable', false, 'PLUGIN');
+			}
+		}
+	}, null, true);
+}
+
 /**
  * Check teardown-sensitive tables without Cacti's db_table_exists() cache.
  * Long-running poller processes can otherwise retain a pre-uninstall result.
@@ -134,6 +168,9 @@ function gnmi_poller_bottom() {
 
 	// Serialize daemon management + telemetry vs concurrent poller.php processes (multi-poller).
 	gnmi_with_poller_exclusive_lock(function () {
+		if ((int)db_fetch_cell("SELECT status FROM plugin_config WHERE directory = 'gnmi'") !== 1) {
+			return;
+		}
 		// Uninstall uses the same lock and may have removed tables while this
 		// poller was waiting. Recheck inside the critical section using the
 		// uncached probe before issuing any plugin-table query.
@@ -240,6 +277,7 @@ function plugin_gnmi_install() {
 	// api_plugin_hook() does not run poller/UI hooks until the plugin is enabled in Console.
 	// Enabling the plugin runs api_plugin_enable_hooks(), which sets all gnmi hooks to status=1.
 	$hooks = array(
+		array('hook' => 'config_arrays', 'function' => 'gnmi_register_shutdown_guard'),
 		array('hook' => 'poller_bottom', 'function' => 'gnmi_poller_bottom'),
 		array('hook' => 'device_edit_pre_bottom', 'function' => 'gnmi_extend_device_edit_form'),
 		array('hook' => 'host_save', 'function' => 'gnmi_save_device_form'),

@@ -130,7 +130,17 @@ jobs:
           )
           python -m tests.public_docs_validator "$extract_dir" --source-docs docs
 
+      - name: Preserve the inspected package
+        uses: actions/upload-artifact@v4
+        with:
+          name: gnmi-package
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+
   php-harness:
+    needs: repository
     name: Cacti 1.2.31 PHP harnesses
     runs-on: ubuntu-latest
 
@@ -178,68 +188,28 @@ jobs:
           docker logs gnmi_cacti_ci
           exit 1
 
-      - name: Deploy plugin and test files
-        shell: bash
-        run: |
-          ./deploy_plugin.sh gnmi_cacti_ci:/var/www/html/cacti/plugins/gnmi/
-          docker cp tests/. \
-            gnmi_cacti_ci:/var/www/html/cacti/plugins/gnmi/tests/
-          docker exec -u root gnmi_cacti_ci \
-            chown -R www-data:www-data /var/www/html/cacti/plugins/gnmi
+      - name: Download the inspected package
+        uses: actions/download-artifact@v4
+        with:
+          name: gnmi-package
+          path: dist
 
-      - name: Verify real legacy-schema preflight
+      - name: Accept the packaged installation
+        env:
+          PACKAGE_EVIDENCE_DIR: ${{ runner.temp }}/package-evidence
         run: |
-          docker exec -u www-data gnmi_cacti_ci \
-            php /var/www/html/cacti/plugins/gnmi/tests/integration/cacti_compat/test_legacy_schema_guard_real.php
+          tests/integration/package/accept.sh \
+            dist/cacti-gnmi-plugin-1.0.0-beta.3-dirty.tar.gz \
+            dist/cacti-gnmi-plugin-1.0.0-beta.3-dirty.tar.gz.sha256 \
+            gnmi_cacti_ci http://127.0.0.1:7083/cacti/
 
-      - name: Install and enable plugin
-        run: |
-          docker exec -u www-data gnmi_cacti_ci \
-            php /var/www/html/cacti/cli/plugin_manage.php \
-            --plugin=gnmi --install --allperms
-          docker exec -u www-data gnmi_cacti_ci \
-            php /var/www/html/cacti/cli/plugin_manage.php \
-            --plugin=gnmi --enable --allperms
-
-      - name: Run standalone PHP harnesses
-        shell: bash
-        run: |
-          docker exec -u www-data gnmi_cacti_ci sh -lc '
-            set -e
-            for test in /var/www/html/cacti/plugins/gnmi/tests/daemon_lifecycle/*.php; do
-              php "$test"
-            done
-            for test in /var/www/html/cacti/plugins/gnmi/tests/status_dashboard/*.php; do
-              php "$test"
-            done
-            for test in /var/www/html/cacti/plugins/gnmi/tests/ajax_actions/*.php; do
-              php "$test"
-            done
-          '
-
-      - name: Verify unauthenticated AJAX responses remain JSON
-        shell: bash
-        run: |
-          python - <<'PY'
-          import json
-          import urllib.error
-          import urllib.request
-
-          url = "http://127.0.0.1:7083/cacti/plugins/gnmi/ajax_handler.php"
-          checks = [
-              (urllib.request.Request(url), 405, "method_not_allowed"),
-              (urllib.request.Request(url, data=b"action=add_subscription", method="POST"), 403, "permission_denied"),
-          ]
-          for request, expected_status, expected_code in checks:
-              try:
-                  urllib.request.urlopen(request)
-                  raise AssertionError("request unexpectedly succeeded")
-              except urllib.error.HTTPError as error:
-                  payload = json.loads(error.read().decode("utf-8"))
-                  assert error.code == expected_status, (error.code, payload)
-                  assert payload["success"] is False, payload
-                  assert payload["code"] == expected_code, payload
-          PY
+      - name: Upload package acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-acceptance
+          path: ${{ runner.temp }}/package-evidence
+          if-no-files-found: warn
 
       - name: Show Cacti logs after failure
         if: failure()
