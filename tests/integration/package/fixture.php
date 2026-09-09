@@ -38,7 +38,20 @@ if ($mode === 'prepare') {
     echo json_encode(array('host_id'=>$host_id, 'device_id'=>(int)$device_id));
 } elseif ($mode === 'snapshot') {
     require_once './plugins/gnmi/setup.php';
-    echo json_encode(gnmi_uninstall_collect_resources());
+    require_once './plugins/gnmi/include/functions.php';
+    $resources = gnmi_uninstall_collect_resources();
+    package_require(!empty($resources['data_source_ids']) && !empty($resources['graph_ids']),
+        'Lifecycle acceptance requires populated data sources and graphs');
+    foreach ($resources['data_source_ids'] as $id) {
+        $path = db_fetch_cell_prepared('SELECT data_source_path FROM data_template_data WHERE local_data_id=?', array($id));
+        $path = str_replace('<path_rra>', $config['rra_path'] ?: $config['base_path'] . '/rra', $path);
+        package_require(gnmi_prepare_rrd_file($path, $id, 'package acceptance', time() - 60),
+            'Cannot create a valid RRD for retention acceptance');
+    }
+    $resources = gnmi_uninstall_collect_resources();
+    package_require(count($resources['rrd_files']) === count($resources['data_source_ids']),
+        'Every test data source must have a physical RRD before uninstall');
+    echo json_encode($resources);
 } elseif ($mode === 'uninstalled') {
     $snapshot = json_decode(file_get_contents('/tmp/package-resources.json'), true);
     package_require(is_array($snapshot), 'Missing resource snapshot');
