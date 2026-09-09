@@ -26,6 +26,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Stop collector daemons when Cacti disables the plugin, including CLI disable,
+  and prevent an in-flight poller from restarting them after disablement.
 - Restored subscription, metric, data-source, graph, and daemon-restart AJAX
   management through a tracked, device-authorized action service.
 - Ensured management failures return structured JSON instead of allowing a
