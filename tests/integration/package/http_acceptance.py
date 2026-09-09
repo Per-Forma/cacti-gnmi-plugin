@@ -78,6 +78,10 @@ def main():
     device = {**host, 'device_id': fixture['device_id']}
     password = os.environ['CACTI_ADMIN_PASSWORD']
     anonymous = Session(args.url)
+    status, body, content_type = anonymous.request('plugins/gnmi/ajax_handler.php')
+    assert status == 405 and content_type == 'application/json'
+    assert json.loads(body)['code'] == 'method_not_allowed'
+    print('PASS: GET method_not_allowed')
     anonymous.action('add_subscription', 403, 'permission_denied', **device)
     admin = Session(args.url)
     admin.login('admin', password)

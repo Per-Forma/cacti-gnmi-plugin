@@ -14,6 +14,7 @@ repo_root=$(cd -- "$script_dir/../../.." && pwd)
 plugin=/var/www/html/cacti/plugins/gnmi
 evidence=${PACKAGE_EVIDENCE_DIR:-"$repo_root/dist/package-acceptance"}
 mkdir -p "$evidence"
+exec > >(tee "$evidence/runner.txt") 2>&1
 work=$(mktemp -d)
 chmod 700 "$work"
 stage=verify
