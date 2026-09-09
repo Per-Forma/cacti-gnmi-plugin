@@ -7,7 +7,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.0.0-beta.3] - Unreleased
+## [1.0.0-beta.3] - 2026-09-09
 
 ### Added
 
@@ -21,7 +21,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Updated the runtime gRPC and protobuf pins and the recorded cffi and
-  cryptography versions through the pending maintenance pull requests.
+  cryptography versions.
 - Updated checkout, Python setup, dependency review, and CodeQL Actions.
 
 ### Fixed
