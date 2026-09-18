@@ -131,7 +131,7 @@ jobs:
           python -m tests.public_docs_validator "$extract_dir" --source-docs docs
 
       - name: Preserve the inspected package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gnmi-package
           path: |
@@ -205,7 +205,7 @@ jobs:
 
       - name: Upload package acceptance evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-acceptance
           path: ${{ runner.temp }}/package-evidence
