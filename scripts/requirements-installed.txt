@@ -5,6 +5,6 @@ grpcio==1.84.0
 protobuf==7.36.1
 pycparser==3.0
 pygnmi==0.8.15
-PyMySQL==1.2.0
+PyMySQL==1.2.3
 PyYAML==6.0.3
 rrdtool-bindings==0.5.0
