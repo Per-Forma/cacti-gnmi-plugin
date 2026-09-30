@@ -10,6 +10,8 @@ if (!defined('CACTI_VERSION')) {
 	die('Access denied');
 }
 
+require_once __DIR__ . '/access.php';
+
 /**
  * Log an event to the audit trail.
  *
@@ -117,9 +119,26 @@ function gnmi_cleanup_old_events($keep_count = 10000) {
  * @return array Array of event records with parsed JSON data
  */
 function gnmi_get_recent_events($device_id = null, $event_type = null, $limit = 50) {
-	$limit = intval($limit);
+	$limit = max(1, intval($limit));
 	$where_clauses = array();
 	$params = array();
+
+	if (gnmi_web_authorization_required()) {
+		// Filter in SQL before LIMIT so hidden events cannot displace visible ones.
+		$allowed_ids = array();
+		if ($device_id !== null) {
+			$device = db_fetch_row_prepared('SELECT id, host_id FROM plugin_gnmi_devices WHERE id = ?', array((int)$device_id));
+			if (!$device || !gnmi_current_user_can_view_host($device['host_id'])) { return array(); }
+			$allowed_ids[] = (int)$device['id'];
+		} else {
+			foreach (db_fetch_assoc('SELECT id, host_id FROM plugin_gnmi_devices') as $device) {
+				if (gnmi_current_user_can_view_host($device['host_id'])) { $allowed_ids[] = (int)$device['id']; }
+			}
+		}
+		if (!$allowed_ids) { return array(); }
+		$where_clauses[] = 'e.device_id IN (' . implode(',', array_fill(0, count($allowed_ids), '?')) . ')';
+		$params = $allowed_ids;
+	}
 
 	if ($device_id !== null) {
 		$where_clauses[] = 'e.device_id = ?';
@@ -187,12 +206,13 @@ function gnmi_get_dashboard_summary() {
 	$summary = array();
 
 	foreach ($devices as $device) {
+		if (!gnmi_current_user_can_view_host($device['host_id'])) { continue; }
 		$device_id = $device['device_id'];
 
 		// Get daemon status
 		$storage_dir = gnmi_get_storage_dir();
 		$pid_file = $storage_dir . '/device_' . $device_id . '.pid';
-		$pid_validation = gnmi_validate_pid_file($device_id, $pid_file);
+		$pid_validation = gnmi_validate_pid_file($device_id, $pid_file, false);
 
 		$daemon_status = 'stopped';
 		$daemon_pid = null;
@@ -212,6 +232,7 @@ function gnmi_get_dashboard_summary() {
 
 		$summary[] = array(
 			'device_id' => $device_id,
+			'enabled' => 1,
 			'host_id' => $device['host_id'],
 			'hostname' => $device['hostname'],
 			'tls_cipher_policy' => (($device['tls_cipher_policy'] ?? 'default') === 'legacy_compatibility')
@@ -247,7 +268,7 @@ function gnmi_get_daemon_stats($device_id) {
 		array($device_id)
 	);
 
-	if (!$device) {
+	if (!$device || !gnmi_current_user_can_view_host($device['host_id'])) {
 		return null;
 	}
 
@@ -258,7 +279,7 @@ function gnmi_get_daemon_stats($device_id) {
 	$log_file = $logs_dir . '/device_' . $device_id . '.log';
 
 	// Get PID validation
-	$pid_validation = gnmi_validate_pid_file($device_id, $pid_file);
+	$pid_validation = gnmi_validate_pid_file($device_id, $pid_file, false);
 
 	$stats = array(
 		'device_id' => $device_id,
@@ -408,6 +429,9 @@ function gnmi_calculate_health_status($daemon_status, $data_age_seconds, $last_p
  * @return array Orphan summary with counts and details
  */
 function gnmi_get_orphan_summary() {
+	if (gnmi_web_authorization_required() && !gnmi_current_user_is_installation_admin()) {
+		return null;
+	}
 	// Use existing Phase 2.8 functions
 	$orphan_pids = gnmi_find_orphan_pids();
 	$orphan_processes = gnmi_find_orphan_processes();

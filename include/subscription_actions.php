@@ -10,6 +10,8 @@ if (!defined('CACTI_VERSION')) {
 	die('Direct access not allowed');
 }
 
+require_once __DIR__ . '/access.php';
+
 /**
  * Return the supported management action names.
  *
@@ -131,7 +133,7 @@ function gnmi_resolve_management_target($action, $request) {
 		}
 
 		$resolved = db_fetch_cell_prepared(
-			'SELECT host_id FROM plugin_gnmi_devices WHERE host_id = ?',
+			'SELECT host_id FROM plugin_gnmi_devices WHERE host_id = ? AND enabled = 1',
 			array($host_id)
 		);
 	} elseif ($action === 'add_subscription') {
@@ -182,7 +184,7 @@ function gnmi_resolve_management_target($action, $request) {
 
 	// Cacti exposes device-level view restrictions through is_device_allowed().
 	// CLI harnesses may bypass this unless they explicitly enable authorization.
-	if (PHP_SAPI !== 'cli' || !empty($GLOBALS['gnmi_enforce_device_auth_in_cli'])) {
+	if (PHP_SAPI !== 'cli' || !empty($GLOBALS['gnmi_enforce_device_auth_in_cli']) || !empty($GLOBALS['gnmi_enforce_web_auth_in_cli'])) {
 		if (!function_exists('is_device_allowed') || !is_device_allowed($submitted_host_id)) {
 			return gnmi_management_result(false, 404, 'target_unavailable', 'Target not found or permission denied.');
 		}
@@ -209,6 +211,11 @@ function gnmi_dispatch_management_action($request) {
 
 	if (!in_array($action, gnmi_management_action_names(), true)) {
 		return gnmi_management_result(false, 400, 'invalid_action', 'Invalid or missing action.');
+	}
+
+	if ($action === 'restart_daemon' && gnmi_web_authorization_required()
+		&& !gnmi_current_user_can_manage_daemons()) {
+		return gnmi_management_result(false, 403, 'permission_denied', 'Permission denied.');
 	}
 
 	$target = gnmi_resolve_management_target($action, $request);

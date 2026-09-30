@@ -7,6 +7,22 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Filter dashboard rows, details, statistics, and events using Cacti's effective
+  device permissions before diagnostic reads. Require the dedicated daemon
+  realm and target access for explicit dashboard and AJAX restarts.
+- Restrict global orphan status to Users/Groups administrators and manual
+  cleanup/recovery to administrators with daemon management. Record manual
+  cleanup at installation level with the actor and outcome counts.
+- Keep dashboard PID inspection and dependency diagnosis read-only; protected
+  code and venv require administrator shell repair.
+
+### Added
+
+- Restricted-session packaged HTTP acceptance and effective user/group,
+  graph/device, guest/no-auth, and revocation coverage on Cacti 1.2.25 and 1.2.31.
+
 ## [1.0.0-beta.3] - 2026-09-09
 
 ### Added

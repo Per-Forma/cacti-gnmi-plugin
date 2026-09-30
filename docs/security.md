@@ -174,3 +174,35 @@ accordingly, since that is where credentials are entered.
 - [user_guide.md](user_guide.md) — device and subscription management
 - [troubleshooting.md](troubleshooting.md) — TLS/auth failure diagnostics
 - [compatibility.md](compatibility.md) — validated software and gNMI platforms
+
+## Dashboard and daemon permissions
+
+Dashboard visibility follows Cacti's effective device access, including graph
+policies, enabled groups, and hide-disabled preferences. Page realm access does
+not grant access to every device. Hidden rows and their diagnostic details are
+filtered before runtime inspection or event retrieval.
+
+Explicit dashboard and AJAX restarts require an authenticated non-guest user,
+**Manage gNMI Daemons**, access to the target's actual Cacti host, an enabled
+gNMI device, POST, and valid CSRF. The submitting page/endpoint retains its
+existing realm. General device management cannot substitute for daemon
+management. Administrators must explicitly grant the dedicated realm where
+needed; existing assignments and the default grant policy remain unchanged.
+
+Installation-wide orphan status requires the core **Users/Groups** permission.
+Manual cleanup and dependency recovery additionally require **Manage gNMI
+Daemons**. Manual cleanup writes an actor-attributed installation audit entry
+to the Cacti log, rather than attaching maintenance to a device. Trusted poller,
+configuration-save, install, disable, and uninstall operations retain their
+existing authorization contracts.
+
+Configured guest and authentication-disabled dashboards follow Cacti's own
+page/device read policy. They cannot execute explicit daemon mutations or
+recover dependencies. Dashboard PID inspection and ordinary dependency
+checks do not repair runtime files or install dependencies. Administrator-owned
+code/venv must be repaired from a shell; web realm grants do not make it writable.
+
+Both tested Cacti versions reset authentication-disabled mode to local
+authentication and password repair. The plugin preserves that behavior and
+denies explicit mutations from the unfinished password-change session. This
+acceptance does not establish an independent no-auth dashboard mode.

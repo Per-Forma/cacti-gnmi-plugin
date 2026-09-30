@@ -13,13 +13,20 @@ include_once(__DIR__ . '/include/status_functions.php');
 include_once(__DIR__ . '/include/status_display.php');
 include_once(__DIR__ . '/include/dashboard_actions.php');
 
+// Let Cacti invalidate stale user/group/settings caches before diagnostics.
+// This also keeps each dashboard's registered view realm independent.
+if (!function_exists('api_plugin_user_realm_auth') || !api_plugin_user_realm_auth(basename(__FILE__))) {
+	http_response_code(403);
+	exit('Access denied');
+}
+
 // Set page title
 $title = __('gNMI Status Dashboard', 'gnmi');
 
 // Handle state-changing actions with post/redirect/get.
 if (isset_request_var('action')) {
-	$action = isset($_POST['action']) ? (string)$_POST['action'] : '';
-	$device_id = isset($_POST['device_id']) ? (int)$_POST['device_id'] : 0;
+	$action = $_POST['action'] ?? '';
+	$device_id = $_POST['device_id'] ?? 0;
 	$result = gnmi_process_dashboard_action($action, $device_id);
 	raise_message('gnmi_dashboard_action', $result['message'], $result['level']);
 	header('Location: index.php');
@@ -42,7 +49,7 @@ if (function_exists('gnmi_requirements_ok') && !gnmi_requirements_ok()) {
 
     // Try to auto-continue setup if system deps became available
     if (!$dep_state['all_ok']) {
-        if (function_exists('gnmi_auto_continue_setup')) {
+        if (gnmi_current_user_can_cleanup_orphans() && function_exists('gnmi_auto_continue_setup')) {
             gnmi_auto_continue_setup();
             // Re-check state after auto-continue
             $dep_state = gnmi_check_all_dependencies(false);
@@ -50,6 +57,10 @@ if (function_exists('gnmi_requirements_ok') && !gnmi_requirements_ok()) {
     }
 
     $messages = array();
+    if (!gnmi_dependency_recovery_is_writable()) {
+        $messages[] = '<strong>Administrator shell repair required:</strong> The plugin code or virtual environment is protected. '
+            . 'Install the missing dependencies from an administrator shell using the commands below. Web permissions do not make these directories writable.';
+    }
     $python_bin = false;
 
     // Collect messages based on actual state
@@ -133,7 +144,7 @@ html_start_box($title, '100%', '', '3', 'center', '');
 
 <tr>
 	<td>
-		<p>This dashboard shows real-time status of all gNMI-enabled devices and their daemons.</p>
+		<p>This dashboard shows real-time status of accessible gNMI-enabled devices and their daemons.</p>
 		<p>
 			<a href="index.php" class="btn btn-primary">Refresh Now</a>
 			<label style="margin-left:20px;">
@@ -146,7 +157,8 @@ html_start_box($title, '100%', '', '3', 'center', '');
 <?php
 html_end_box();
 
-// Display orphan summary panel
+// Display installation maintenance only to installation administrators.
+if ($orphan_summary !== null) {
 html_start_box(__('System Health', 'gnmi'), '100%', '', '3', 'center', '');
 ?>
 
@@ -159,6 +171,8 @@ html_start_box(__('System Health', 'gnmi'), '100%', '', '3', 'center', '');
 <?php
 html_end_box();
 
+}
+
 // Display device summary table
 html_start_box(__('Device Status', 'gnmi'), '100%', '', '3', 'center', '');
 ?>
@@ -167,7 +181,7 @@ html_start_box(__('Device Status', 'gnmi'), '100%', '', '3', 'center', '');
 	<td>
 		<?php
 		if (empty($devices)) {
-			echo '<p>No gNMI devices configured. <a href="' . html_escape($config['url_path']) . 'host.php">Add devices</a> and enable gNMI telemetry.</p>';
+			echo gnmi_render_no_accessible_devices();
 		} else {
 			echo gnmi_render_summary_table($devices);
 		}
