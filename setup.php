@@ -121,6 +121,7 @@ function gnmi_poller_tables_available() {
  */
 function gnmi_poller_bottom() {
 	global $config;
+	$hook_entry = hrtime(true) / 1000000000;
 
 	cacti_log("gNMI: Hook gnmi_poller_bottom() called", false, 'POLLER', POLLER_VERBOSITY_LOW);
 
@@ -167,7 +168,8 @@ function gnmi_poller_bottom() {
 	}
 
 	// Serialize daemon management + telemetry vs concurrent poller.php processes (multi-poller).
-	gnmi_with_poller_exclusive_lock(function () {
+	$collection_target = $hook_entry + min(.8 * gnmi_get_poller_interval(), 30);
+	gnmi_with_poller_exclusive_lock(function () use ($collection_target) {
 		if ((int)db_fetch_cell("SELECT status FROM plugin_config WHERE directory = 'gnmi'") !== 1) {
 			return;
 		}
@@ -179,7 +181,7 @@ function gnmi_poller_bottom() {
 			return;
 		}
 
-		gnmi_manage_daemons();
+		gnmi_manage_daemons($collection_target);
 	});
 
 	cacti_log("gNMI: Hook gnmi_poller_bottom() completed", false, 'POLLER', POLLER_VERBOSITY_LOW);

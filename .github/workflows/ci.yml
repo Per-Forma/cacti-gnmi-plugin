@@ -63,6 +63,10 @@ jobs:
             php -l "$file"
           done
 
+      - name: Exercise private bridge PHP boundaries
+        run: |
+          for test in tests/poller_bridge/*.php; do php "$test"; done
+
   repository:
     name: Repository hygiene
     runs-on: ubuntu-latest
@@ -212,6 +216,11 @@ jobs:
             dist/cacti-gnmi-plugin-1.0.0-beta.3-dirty.tar.gz \
             dist/cacti-gnmi-plugin-1.0.0-beta.3-dirty.tar.gz.sha256 \
             gnmi_cacti_ci http://127.0.0.1:7083/cacti/
+
+      - name: Accept private database transports from the installed archive
+        shell: bash
+        run: |
+          tests/integration/database/accept_transport.sh gnmi_cacti_ci >"$RUNNER_TEMP/package-evidence/bridge-transports.json"
 
       - name: Upload package acceptance evidence
         if: always()
