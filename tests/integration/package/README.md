@@ -15,7 +15,9 @@ tests/integration/package/accept.sh \
 
 The runner validates both checksum layers, deploys only the archive's runtime,
 adds test fixtures separately, installs the plugin, and runs the existing PHP
-harnesses plus authenticated HTTP management acceptance. It then disables,
+harnesses, private bridge PHP contracts, exact RRD samples and first graphs,
+shared failure/recovery, inherited deadlines and fair resumption, resolver HTTP
+refusal, plus authenticated HTTP management acceptance. It then disables,
 uninstalls, and reinstalls the plugin, checking daemon and metadata cleanup.
 It creates disposable administrative credentials and a restricted test user;
 never run it against an existing Cacti deployment.
@@ -27,7 +29,7 @@ versions, and focused test results are retained. No cookies, request bodies,
 credentials, or device configuration files are included in evidence.
 
 CI builds and inspects one archive in Repository hygiene, transfers it as an
-artifact, and tests those bytes in Cacti 1.2.31 PHP harnesses. Development
+artifact, and tests those bytes in Cacti 1.2.25 and 1.2.31 PHP harnesses. Development
 archives have a `-dirty` suffix and must never be published.
 
 ## Release gate

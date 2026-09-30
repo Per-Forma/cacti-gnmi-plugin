@@ -26,7 +26,8 @@ Optional arguments:
 - `--output-history`: emit timestamped sample history lines for RRD backfill instead of only the latest sample.
 - `--staleness-threshold`: maximum acceptable data age in seconds. PHP passes `gnmi_get_poller_interval() * 2`.
 - `--debug`: enable debug logging on stderr.
-- `--cacti-config`: path to Cacti `include/config.php` for database credentials.
+- `--config-path`: trusted Cacti `include/config.php` for standalone testing. Normal polling sends the selected connection through private stdin.
+- `--php-binary`: CLI PHP executable for standalone config evaluation.
 
 ## Metric Selection
 
@@ -74,3 +75,5 @@ At 10s, 60s, and 300s poller intervals, the bridge threshold is 20s, 120s, and 6
 - `2`: stale data; no data was emitted so Cacti/RRD can record unknown values.
 
 All diagnostics are written to stderr so stdout remains parseable by Cacti.
+
+See [database configuration](bridge_database.md) for transport, TLS, service-account prerequisites, safe diagnostics and shared deadlines.

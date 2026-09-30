@@ -58,7 +58,9 @@ def verify(archive, checksum, destination):
         raise ValueError('Internal checksum mismatch or unlisted files')
     for name in ('MANIFEST.md', 'RELEASE_NOTES.md', 'gnmi/INFO', 'gnmi/setup.php',
                  'gnmi/ajax_handler.php', 'gnmi/include/subscription_actions.php',
-                 'gnmi/scripts/requirements.txt', 'gnmi/scripts/gnmi_daemon.py'):
+                 'gnmi/scripts/requirements.txt', 'gnmi/scripts/gnmi_daemon.py',
+                 'gnmi/scripts/gnmi_database_config.php', 'gnmi/include/database_config.php',
+                 'gnmi/include/poller_bridge.php'):
         if name not in actual:
             raise ValueError('Missing required package file: ' + name)
     return root

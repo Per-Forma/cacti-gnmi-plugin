@@ -49,6 +49,8 @@ docker cp "$package/gnmi/." "$container:$plugin/"
 docker cp "$repo_root/tests" "$container:$plugin/tests"
 docker cp "$script_dir/fixture.php" "$container:/tmp/package-fixture.php"
 docker exec -u root "$container" chown -R www-data:www-data "$plugin"
+# Keep fixture timing independent of the disposable cron scheduler.
+docker exec -u root "$container" service cron stop >/dev/null
 stage=legacy_preflight
 docker exec -u www-data "$container" php "$plugin/tests/integration/cacti_compat/test_legacy_schema_guard_real.php"
 manage() {
@@ -58,8 +60,9 @@ fixture() {
   docker exec -u www-data -e PACKAGE_FIXTURE_MODE="$1" -e CACTI_ADMIN_PASSWORD "$container" php /tmp/package-fixture.php
 }
 stage=install
-manage --install --allperms
+manage --install --enable --allperms
 manage --enable --allperms
+fixture enable
 fixture installed
 docker exec "$container" php -v >"$evidence/php-version.txt"
 docker exec "$container" "$plugin/venv/bin/python3" --version >"$evidence/python-version.txt"
@@ -73,6 +76,13 @@ docker exec -u www-data "$container" sh -c '
     for test in /var/www/html/cacti/plugins/gnmi/tests/$suite/*.php; do php "$test"; done
   done
 ' >"$evidence/php-harnesses.txt" 2>&1
+stage=bridge_database
+for test in "$repo_root"/tests/poller_bridge/*.php; do
+  docker exec -u www-data "$container" php "$plugin/tests/poller_bridge/$(basename "$test")"
+done >"$evidence/bridge-php.txt" 2>&1
+docker exec -u www-data "$container" php "$plugin/tests/integration/cacti_compat/test_bridge_database_real.php" >"$evidence/bridge-cacti.json" 2>&1
+status=$(curl -sS -o "$work/helper-http" -w '%{http_code}' "${url%/}/plugins/gnmi/scripts/gnmi_database_config.php")
+[[ "$status" == 403 && ! -s "$work/helper-http" ]] || { echo 'Internal resolver must refuse HTTP without a payload' >&2; exit 1; }
 stage=http
 export CACTI_ADMIN_PASSWORD
 CACTI_ADMIN_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
@@ -93,6 +103,7 @@ assert_stopped() {
 }
 assert_stopped
 manage --enable --allperms
+fixture enable
 fixture installed
 stage=uninstall
 manage --disable
@@ -100,8 +111,9 @@ manage --uninstall
 assert_stopped
 fixture uninstalled >"$evidence/lifecycle.txt"
 stage=reinstall
-manage --install --allperms
+manage --install --enable --allperms
 manage --enable --allperms
+fixture enable
 fixture installed >>"$evidence/lifecycle.txt"
 stage=complete
 echo 'PASS: packaged install, HTTP management, disable, uninstall and reinstall'

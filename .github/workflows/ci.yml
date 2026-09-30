@@ -63,6 +63,10 @@ jobs:
             php -l "$file"
           done
 
+      - name: Exercise private bridge PHP boundaries
+        run: |
+          for test in tests/poller_bridge/*.php; do php "$test"; done
+
   repository:
     name: Repository hygiene
     runs-on: ubuntu-latest
@@ -141,7 +145,17 @@ jobs:
 
   php-harness:
     needs: repository
-    name: Cacti 1.2.31 PHP harnesses
+    name: Cacti ${{ matrix.cacti }} PHP harnesses
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cacti: "1.2.25"
+            commit: 18500fa313a9f1ee1be48aa111c0eeea001010fa
+            sha256: 8c5a73bc88258ba29bf33c7f27fb788f3d1fe0d0087e61aa85633af3a9140389
+          - cacti: "1.2.31"
+            commit: 1e8eaca26b84b128c39ce8cc8ece42d7ff76aac1
+            sha256: fcc37e877e3e4c937a9cd245101784bc0961a0652f542660e8dce1e86c4e3a15
     runs-on: ubuntu-latest
 
     steps:
@@ -154,10 +168,10 @@ jobs:
           {
             echo "TZ=UTC"
             echo "COMPOSE_PROJECT_NAME=gnmi-ci"
-            echo "CACTI_VERSION=1.2.31"
-            echo "CACTI_COMMIT=1e8eaca26b84b128c39ce8cc8ece42d7ff76aac1"
-            echo "CACTI_TARBALL_SHA256=fcc37e877e3e4c937a9cd245101784bc0961a0652f542660e8dce1e86c4e3a15"
-            echo "CACTI_IMAGE=gnmi-cacti-ci:1.2.31"
+            echo "CACTI_VERSION=${{ matrix.cacti }}"
+            echo "CACTI_COMMIT=${{ matrix.commit }}"
+            echo "CACTI_TARBALL_SHA256=${{ matrix.sha256 }}"
+            echo "CACTI_IMAGE=gnmi-cacti-ci:${{ matrix.cacti }}"
             echo "CACTI_CONTAINER=gnmi_cacti_ci"
             echo "DB_CONTAINER=gnmi_cacti_ci_db"
             echo "STATE_DIR=$RUNNER_TEMP/gnmi-cacti-ci"
@@ -203,11 +217,16 @@ jobs:
             dist/cacti-gnmi-plugin-1.0.0-beta.3-dirty.tar.gz.sha256 \
             gnmi_cacti_ci http://127.0.0.1:7083/cacti/
 
+      - name: Accept private database transports from the installed archive
+        shell: bash
+        run: |
+          tests/integration/database/accept_transport.sh gnmi_cacti_ci >"$RUNNER_TEMP/package-evidence/bridge-transports.json"
+
       - name: Upload package acceptance evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: package-acceptance
+          name: package-acceptance-${{ matrix.cacti }}
           path: ${{ runner.temp }}/package-evidence
           if-no-files-found: warn
 
