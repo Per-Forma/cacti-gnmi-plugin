@@ -16,6 +16,10 @@ if ($mode === 'prepare') {
     db_execute_prepared("UPDATE user_auth SET password=?, must_change_password='', password_change='', enabled='on' WHERE username='admin'",
         array(compat_password_hash($password, PASSWORD_DEFAULT)));
     $user = db_fetch_row("SELECT * FROM user_auth WHERE username='admin' AND realm=0");
+    foreach (db_fetch_assoc("SELECT id FROM plugin_realms WHERE plugin='gnmi'") as $realm) {
+        db_execute_prepared('REPLACE INTO user_auth_realm (realm_id,user_id) VALUES (?,?)', array((int)$realm['id'] + 100,$user['id']));
+    }
+    db_execute_prepared('REPLACE INTO user_auth_realm (realm_id,user_id) VALUES (1,?)', array($user['id']));
     package_require(!empty($user), 'Missing administrative fixture');
     $user['id'] = 0;
     $user['username'] = 'package-denied';
@@ -67,6 +71,11 @@ if ($mode === 'prepare') {
         package_require(is_file($path), 'Uninstall removed a physical RRD');
     }
     echo "PASS: uninstall removed plugin tables, hooks and owned metadata; retained RRD files\n";
+} elseif ($mode === 'enable') {
+    // Cacti 1.2.25's CLI ignores standalone --enable. Use its supported API
+    // for re-enabling an installed plugin, without changing realm grants.
+    api_plugin_enable('gnmi');
+    package_require(api_plugin_is_enabled('gnmi'), 'Plugin enable API failed');
 } elseif ($mode === 'installed') {
     package_require(count(db_fetch_assoc("SHOW TABLES LIKE 'plugin_gnmi_%'")) === 4, 'Expected four plugin tables');
     package_require((int)db_fetch_cell("SELECT COUNT(*) FROM plugin_config WHERE directory='gnmi' AND status=1") === 1,

@@ -939,7 +939,8 @@ function gnmi_render_device_form_section($host_id, $gnmi_settings = [], $metric_
 		</td>
 	</tr>
 
-	<?php if ($host_id > 0): ?>
+	<?php if ($host_id > 0 && gnmi_current_user_has_plugin_realm('ajax_handler.php')
+		&& gnmi_current_user_can_restart_device(db_fetch_row_prepared('SELECT * FROM plugin_gnmi_devices WHERE host_id = ?', array($host_id)))): ?>
 		<tr class="gnmi-setting-row" style="<?php echo $gnmi_display; ?>">
 			<td class="textEditTitle" style="padding-left: 30px;"></td>
 			<td>

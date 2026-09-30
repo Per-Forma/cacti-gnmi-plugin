@@ -152,7 +152,14 @@ graphs belong.
 
 ## 5. The Status Dashboard
 
-**Console → Plugins → gNMI Telemetry** opens the dashboard. It shows, per device:
+**Console → Plugins → gNMI Telemetry** opens the dashboard. Each dashboard
+retains its own View gNMI realm. Rows, hidden Details, errors, and events include
+only devices the current user may view under Cacti's effective device/graph
+policies, enabled-group grants, and hide-disabled preference. An enabled gNMI
+configuration on a hidden disabled or deleted Cacti host is unavailable here.
+An empty result says **No accessible gNMI devices are currently enabled.**
+
+It shows, per accessible device:
 
 - **Health** — `healthy` / `warning` / `critical` / `unknown`, based on daemon
   state and data freshness.
@@ -160,12 +167,28 @@ graphs belong.
 - **Data freshness** — time since the last JSON write; stale data (older than
   ~2× the poller interval) is flagged.
 - **Last poll status / error** — surfaced from the device record.
-- **Orphan widget** — count of orphaned daemon processes with a manual cleanup
-  button (orphans are also cleaned automatically each poller cycle).
+- **Orphan widget** — installation-wide orphan status, visible only to users
+  with Cacti's **Users/Groups** permission. Manual cleanup additionally requires
+  **Manage gNMI Daemons**. Automatic poller cleanup continues installation-wide.
 
 The page auto-refreshes and supports drill-down into per-device detail and the
 event audit trail (`plugin_gnmi_events`), which logs daemon lifecycle and config
 changes.
+
+To grant explicit restart access, open **Console → Configuration → Users** (or
+**User Groups**), edit the operator's effective permissions, and select
+**Manage gNMI Daemons**. Keep the appropriate View gNMI page realms; the device
+form's restart also needs **gNMI AJAX Handler**. Restart requires an enabled
+gNMI target that the operator can view. General device-management permission
+alone does not grant Restart, including for existing administrators. The
+dedicated daemon realm keeps its existing default of no automatic grant.
+
+Global cleanup and dashboard dependency recovery require both **Users/Groups**
+and **Manage gNMI Daemons**. Dependency checks for other viewers only diagnose
+missing packages; they do not create a venv or install packages. Protected code
+or venv directories require administrator shell repair using the banner's
+commands. Realm grants do not change filesystem permissions. Dashboard health
+reads preserve stale PID files for trusted lifecycle cleanup.
 
 ---
 

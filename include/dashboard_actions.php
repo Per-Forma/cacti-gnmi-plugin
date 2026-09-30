@@ -7,6 +7,8 @@ if (!defined('CACTI_VERSION')) {
 	die('Access denied');
 }
 
+require_once __DIR__ . '/access.php';
+
 /**
  * Execute a dashboard action only for an authorized, CSRF-protected POST.
  *
@@ -27,7 +29,7 @@ function gnmi_process_dashboard_action($action, $device_id = 0) {
 		);
 	}
 
-	if (!gnmi_current_user_can_manage('dashboard_actions.php')) {
+	if (!gnmi_current_user_can_manage_daemons()) {
 		return array(
 			'success' => false,
 			'message' => __('You are not authorized to manage gNMI daemons.', 'gnmi'),
@@ -44,10 +46,11 @@ function gnmi_process_dashboard_action($action, $device_id = 0) {
 	}
 
 	if ($action === 'restart') {
-		if ($device_id <= 0) {
+		if ((!is_string($device_id) && !is_int($device_id))
+			|| filter_var($device_id, FILTER_VALIDATE_INT, array('options' => array('min_range' => 1))) === false) {
 			return array(
 				'success' => false,
-				'message' => __('A valid device is required.', 'gnmi'),
+				'message' => __('Target not found or permission denied.', 'gnmi'),
 				'level' => MESSAGE_LEVEL_ERROR,
 			);
 		}
@@ -57,7 +60,12 @@ function gnmi_process_dashboard_action($action, $device_id = 0) {
 			array($device_id)
 		);
 
-		if (!$device || !gnmi_restart_daemon($device)) {
+		if (!$device || !gnmi_current_user_can_restart_device($device, false)) {
+			return array('success' => false, 'message' => __('Target not found or permission denied.', 'gnmi'),
+				'level' => MESSAGE_LEVEL_ERROR);
+		}
+
+		if (!gnmi_restart_daemon($device)) {
 			return array(
 				'success' => false,
 				'message' => __('Failed to restart daemon for device %d', $device_id, 'gnmi'),
@@ -78,12 +86,15 @@ function gnmi_process_dashboard_action($action, $device_id = 0) {
 	}
 
 	if ($action === 'cleanup_orphans') {
-		gnmi_cleanup_orphans();
-		$first_device = db_fetch_cell('SELECT id FROM plugin_gnmi_devices LIMIT 1');
-		gnmi_log_event($first_device ? $first_device : 0, 'orphan_cleanup', array(
-			'trigger' => 'manual',
-			'user' => isset($_SESSION['sess_user_id']) ? $_SESSION['sess_user_id'] : 'unknown',
-		));
+		if (!gnmi_current_user_is_installation_admin()) {
+			return array('success' => false, 'message' => __('You are not authorized to perform installation maintenance.', 'gnmi'),
+				'level' => MESSAGE_LEVEL_ERROR);
+		}
+		$counts = null;
+		gnmi_cleanup_orphans(true, $counts);
+		cacti_log('gNMI: Manual orphan cleanup actor=' . (int)$_SESSION['sess_user_id']
+			. ' outcome=completed orphans_found=' . (int)$counts['orphans_found']
+			. ' processes_stopped=' . (int)$counts['processes_stopped'], false, 'GNMI');
 
 		return array(
 			'success' => true,

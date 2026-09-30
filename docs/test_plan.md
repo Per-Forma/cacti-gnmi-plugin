@@ -137,3 +137,37 @@ validate migration from an earlier gNMI plugin schema.
   — Cacti compatibility harness
 - [SR Linux integration harness](https://github.com/Per-Forma/cacti-gnmi-plugin/tree/main/tests/integration/srlinux)
   — SR Linux interoperability harness
+
+## Dashboard access acceptance
+
+Use fresh disposable Cacti 1.2.25 and 1.2.31 installations and the same archive.
+Create distinguishable devices A and B and verify the effective Cacti policy
+allows A and denies B before testing the plugin. Use actual login sessions and
+CSRF tokens; an administrator-only smoke test is insufficient.
+
+| Session/scenario | Expected result |
+| --- | --- |
+| Viewer with both dashboard realms | A health, Details, and events only; no B markers in raw HTML, restart controls, or orphan panel |
+| General device manager without daemon realm | Explicit dashboard and AJAX restarts denied, including A |
+| Scoped daemon operator, allowed A/denied B | Restart A succeeds on both dashboards and AJAX; B, missing, deleted, and disabled targets are unavailable |
+| Enabled/disabled groups and graph/device policy combinations | Dashboard matches `is_device_allowed()`; disabled group grants cannot authorize restart |
+| Hide-disabled preference and graphless hosts | Dashboard/restart uses Cacti's effective result, including an enabled plugin on a hidden Cacti host |
+| Users/Groups without daemon management | Orphan panel visible; cleanup and dependency recovery denied |
+| Users/Groups with daemon management | Installation cleanup succeeds, including deleted-device orphans; actor and outcome counts logged at installation level |
+| Unknown/array action or target, GET, invalid CSRF, guest, missing authorization APIs | No process, PID/config, or successful lifecycle-event changes |
+| Permissions revoked in an active session | Cacti refresh/redirect honored; subsequent requests deny without a stale plugin grant |
+| Empty authorized inventory | No accessible gNMI devices message; Add devices link only for device managers |
+| Missing dependencies and stale/wrong-process PID files | Viewer GET preserves files and cannot create a venv/install packages; protected code/venv gives shell remediation |
+| Configured guest or authentication disabled | Follow Cacti's page/device read policy; no explicit mutation/recovery bypass |
+| Trusted CLI/poller and configuration save | Existing installation-wide lifecycle, save-triggered restarts, disable/uninstall/reinstall continue without a browser session |
+
+The packaged runner under `tests/integration/package/` automates the restricted
+HTTP matrix, policy comparisons, CSRF, process/event state assertions, dependency
+checks, and lifecycle regression. Retain its redacted source/archive identity
+and results outside the package. Verify permissions under the installation's
+own user/group policies as part of beta testing.
+
+Both tested Cacti versions reset authentication-disabled mode to local
+authentication and password repair. The plugin preserves that behavior and
+denies explicit mutations from the unfinished password-change session. This
+acceptance does not establish an independent no-auth dashboard mode.

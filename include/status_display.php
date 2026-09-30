@@ -10,6 +10,8 @@ if (!defined('CACTI_VERSION')) {
 	die('Access denied');
 }
 
+require_once __DIR__ . '/access.php';
+
 /**
  * Render the main device summary table.
  *
@@ -18,7 +20,7 @@ if (!defined('CACTI_VERSION')) {
  */
 function gnmi_render_summary_table($devices) {
 	if (empty($devices)) {
-		return '<p>No gNMI devices configured or enabled.</p>';
+		return gnmi_render_no_accessible_devices();
 	}
 
 	$html = '<table class="cactiTable" style="width:100%">';
@@ -40,6 +42,7 @@ function gnmi_render_summary_table($devices) {
 	// Table body
 	$html .= '<tbody>';
 	foreach ($devices as $device) {
+		if (!gnmi_current_user_can_view_host($device['host_id'] ?? 0)) { continue; }
 		$html .= '<tr>';
 
 		// Device description
@@ -83,12 +86,15 @@ function gnmi_render_summary_table($devices) {
 
 		// Actions (expand details, restart daemon)
 		$html .= '<td>';
-		$html .= '<a href="#" onclick="toggleDeviceDetails(' . $device['device_id'] . '); return false;">Details</a> | ';
-		$html .= '<form method="post" action="" style="display:inline">';
-		$html .= '<input type="hidden" name="action" value="restart">';
-		$html .= '<input type="hidden" name="device_id" value="' . (int)$device['device_id'] . '">';
-		$html .= '<button type="submit" class="linkOverDark" style="border:0;background:none;padding:0;cursor:pointer">Restart</button>';
-		$html .= '</form>';
+		$html .= '<a href="#" onclick="toggleDeviceDetails(' . $device['device_id'] . '); return false;">Details</a>';
+		if (!gnmi_web_authorization_required() || gnmi_current_user_can_restart_device($device)) {
+			$html .= ' | ';
+			$html .= '<form method="post" action="" style="display:inline">';
+			$html .= '<input type="hidden" name="action" value="restart">';
+			$html .= '<input type="hidden" name="device_id" value="' . (int)$device['device_id'] . '">';
+			$html .= '<button type="submit" class="linkOverDark" style="border:0;background:none;padding:0;cursor:pointer">Restart</button>';
+			$html .= '</form>';
+		}
 		$html .= '</td>';
 
 		$html .= '</tr>';
@@ -144,6 +150,7 @@ function gnmi_render_health_badge($health) {
  * @return string HTML markup for detail panel
  */
 function gnmi_render_device_detail($device) {
+	if (!gnmi_current_user_can_view_host($device['host_id'] ?? 0)) { return ''; }
 	$device_id = $device['device_id'];
 
 	// Get detailed stats
@@ -283,6 +290,7 @@ function gnmi_format_event_data($event_type, $event_data) {
  * @return string HTML markup for orphan panel
  */
 function gnmi_render_orphan_panel($orphan_summary) {
+	if (!$orphan_summary || (gnmi_web_authorization_required() && !gnmi_current_user_is_installation_admin())) { return ''; }
 	$total = $orphan_summary['total_orphans'];
 
 	$html = '<div class="orphanPanel" style="padding:15px; border:2px solid #6c757d; border-radius:5px; margin:10px 0; background-color:#f8f9fa;">';
@@ -296,10 +304,12 @@ function gnmi_render_orphan_panel($orphan_summary) {
 		$html .= '<li>Orphaned PID files: ' . $orphan_summary['orphan_pids'] . '</li>';
 		$html .= '<li>Orphaned processes: ' . $orphan_summary['orphan_processes'] . '</li>';
 		$html .= '</ul>';
-		$html .= '<form method="post" action="">';
-		$html .= '<input type="hidden" name="action" value="cleanup_orphans">';
-		$html .= '<button type="submit" class="btn btn-warning">Clean Up Orphans Now</button>';
-		$html .= '</form>';
+		if (!gnmi_web_authorization_required() || gnmi_current_user_can_cleanup_orphans()) {
+			$html .= '<form method="post" action="">';
+			$html .= '<input type="hidden" name="action" value="cleanup_orphans">';
+			$html .= '<button type="submit" class="btn btn-warning">Clean Up Orphans Now</button>';
+			$html .= '</form>';
+		}
 		$html .= '<p style="font-size:0.9em; color:#6c757d;">Note: Orphans are automatically cleaned up every poller cycle.</p>';
 	}
 
