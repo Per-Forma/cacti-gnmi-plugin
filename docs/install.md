@@ -20,7 +20,7 @@ device.
 | Component | Minimum | Notes |
 |-----------|---------|-------|
 | Cacti     | 1.2.25+ | Cacti 1.2.25 introduces the data-input removal API required for a safe plugin uninstall. |
-| PHP       | 8.1+    | JSON extension required (included with supported PHP versions). |
+| PHP       | 8.1+    | JSON extension and argument-array `proc_open()` in poller PHP; CLI PHP for standalone bridge tests. |
 | Python    | 3.12+   | Used by the daemon, bridge, and collector modules. |
 | Database  | MySQL 5.7+ / MariaDB 10.2+ | JSON column support required. |
 | OS        | Linux with `/proc` | Daemon health metrics (uptime, memory) read from `/proc`. |
@@ -267,3 +267,6 @@ There is no automated schema downgrade.
 - [troubleshooting.md](troubleshooting.md) — diagnostics for common failures
 - [test_plan.md](test_plan.md) — manual validation checklist
 - [architecture.md](architecture.md) — how the daemon → JSON → bridge → RRD pipeline works
+
+The bridge uses Cacti's effective database connection. Verify the actual poller
+account and PHP interpreter as described in [database configuration](bridge_database.md).

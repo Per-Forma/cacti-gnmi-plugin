@@ -30,6 +30,15 @@ import logging
 import os
 import re
 import sys
+import base64
+import binascii
+import signal
+import socket
+import ssl
+import subprocess
+import selectors
+import time
+import pymysql
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -50,87 +59,194 @@ logger = logging.getLogger('gnmi_poller_bridge')
 DEFAULT_CACTI_CONFIG = Path(__file__).resolve().parents[3] / "include/config.php"
 
 
-def parse_cacti_config(config_path: str = str(DEFAULT_CACTI_CONFIG)) -> Dict[str, str]:
-    """
-    Parse Cacti's PHP config file to extract database credentials.
+CONFIG_LIMIT = 65536
+DIAGNOSTICS = {
+    'configuration': 'Database configuration is invalid or incomplete',
+    'php_unavailable': 'CLI PHP is unavailable; check the poller service account',
+    'permissions': 'Database configuration or TLS material is not readable by the poller account',
+    'socket_resolution': 'Set an absolute pdo_mysql.default_socket in the poller PHP configuration',
+    'dns': 'Database name resolution failed',
+    'refused': 'Database connection was refused; check availability and transport settings',
+    'timeout': 'Database bridge deadline expired; collection will resume on the next cycle',
+    'authentication': 'Database authentication failed; check the effective Cacti configuration',
+    'tls_identity': 'Database TLS trust or hostname validation failed; correct the CA or certificate identity',
+    'tls_client': 'Database client certificate or key could not be loaded; check readability and identity',
+    'tls_required': 'Database TLS is required; the server must support encrypted connections',
+    'tls': 'Database TLS negotiation failed; check server and certificate configuration',
+    'routing': 'Unsupported database routing; test through the actual PHP poller',
+    'metadata': 'Database metric metadata query failed',
+    'execution': 'Database bridge execution failed',
+}
 
-    Args:
-        config_path: Path to Cacti config.php file
 
-    Returns:
-        Dict with keys: hostname, database, username, password
+class DatabaseConfigError(ValueError):
+    """Only allowlisted text may cross the private subprocess boundary."""
+    def __init__(self, category='configuration', phase='configuration'):
+        self.category = category if category in DIAGNOSTICS else 'execution'
+        self.phase = phase if phase in ('configuration', 'resolver', 'connect', 'metadata', 'execution') else 'execution'
+        super().__init__(DIAGNOSTICS[self.category])
 
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-        ValueError: If required config values are missing
-    """
-    config_path_obj = Path(config_path)
-    if not config_path_obj.exists():
-        raise FileNotFoundError(f"Cacti config file not found: {config_path}")
 
-    config = {}
+def report_error(error):
+    # Machine-readable, nonsecret category; PHP never logs arbitrary stderr.
+    sys.stderr.write(f'GNMI_BRIDGE_ERROR {error.category} {error.phase}\n')
+    sys.stderr.write(DIAGNOSTICS[error.category] + '\n')
 
+
+def validate_database_config(raw):
+    """Validate exactly one bounded JSON object, preserving PHP password bytes."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise DatabaseConfigError()
+            result[key] = value
+        return result
     try:
-        with open(config_path_obj, 'r') as f:
-            content = f.read()
+        if not isinstance(raw, bytes) or len(raw) > CONFIG_LIMIT:
+            raise DatabaseConfigError()
+        cfg = json.loads(raw, object_pairs_hook=unique)
+        required = {'version', 'type', 'host', 'port', 'database', 'username', 'password_b64', 'tls'}
+        optional = {'unix_socket', 'ca', 'cert', 'key'}
+        if not isinstance(cfg, dict) or not required <= cfg.keys() or cfg.keys() - required - optional:
+            raise DatabaseConfigError()
+        if type(cfg['version']) is not int or cfg['version'] != 1 or cfg['type'] != 'mysql':
+            raise DatabaseConfigError()
+        if type(cfg['port']) is not int or not 1 <= cfg['port'] <= 65535 or type(cfg['tls']) is not bool:
+            raise DatabaseConfigError()
+        for field in ('host', 'database', 'username', 'password_b64'):
+            if not isinstance(cfg[field], str) or '\x00' in cfg[field]:
+                raise DatabaseConfigError()
+        if not cfg['host'] or not cfg['database']:
+            raise DatabaseConfigError()
+        for field in optional & cfg.keys():
+            if not isinstance(cfg[field], str) or not cfg[field].startswith('/') or '\x00' in cfg[field]:
+                raise DatabaseConfigError()
+        if bool(cfg.get('cert')) != bool(cfg.get('key')):
+            raise DatabaseConfigError('tls_client')
+        cfg['password'] = base64.b64decode(cfg.pop('password_b64'), validate=True)
+        return cfg
+    except DatabaseConfigError:
+        raise
+    except (TypeError, ValueError, UnicodeError, json.JSONDecodeError, binascii.Error):
+        raise DatabaseConfigError() from None
 
-        # Parse PHP-style config variables
-        # Pattern: $database_hostname = 'db';
-        patterns = {
-            'hostname': r"\$database_hostname\s*=\s*['\"]([^'\"]+)['\"]",
-            'database': r"\$database_default\s*=\s*['\"]([^'\"]+)['\"]",
-            'username': r"\$database_username\s*=\s*['\"]([^'\"]+)['\"]",
-            'password': r"\$database_password\s*=\s*['\"]([^'\"]+)['\"]"
-        }
 
-        for key, pattern in patterns.items():
-            match = re.search(pattern, content)
-            if match:
-                config[key] = match.group(1)
+def parse_cacti_config(config_path=str(DEFAULT_CACTI_CONFIG), php_binary='php', deadline=None):
+    """Evaluate trusted PHP through a CLI-only helper, with bounded private pipes."""
+    target = min(deadline or float('inf'), time.monotonic() + 3)
+    helper = Path(__file__).with_name('gnmi_database_config.php')
+    child = None
+    try:
+        child = subprocess.Popen([php_binary, str(helper), str(Path(config_path).absolute())],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 start_new_session=True)
+        captured = bytearray()
+        diagnostic = bytearray()
+        with selectors.DefaultSelector() as selector:
+            for pipe in (child.stdout, child.stderr):
+                os.set_blocking(pipe.fileno(), False)
+                selector.register(pipe, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = target - .15 - time.monotonic()
+                if remaining <= 0:
+                    raise DatabaseConfigError('timeout', 'resolver')
+                for key, _ in selector.select(min(remaining, .05)):
+                    chunk = os.read(key.fd, 8192)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                    elif key.fileobj is child.stdout:
+                        captured.extend(chunk)
+                        if len(captured) > CONFIG_LIMIT:
+                            raise DatabaseConfigError()
+                    else:
+                        diagnostic.extend(chunk[:max(0, 8192-len(diagnostic))])
+        child.wait(timeout=max(.001, target-time.monotonic()))
+        if child.returncode != 0 or diagnostic:
+            match = re.fullmatch(rb'GNMI_BRIDGE_ERROR ([a-z_]+) resolver\n', diagnostic)
+            category = match[1].decode('ascii') if match else 'configuration'
+            raise DatabaseConfigError(category, 'resolver')
+        return validate_database_config(bytes(captured))
+    except (FileNotFoundError, PermissionError):
+        raise DatabaseConfigError('php_unavailable', 'resolver') from None
+    except subprocess.TimeoutExpired:
+        raise DatabaseConfigError('timeout', 'resolver') from None
+    finally:
+        if child is not None:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.wait(timeout=max(.001, target-time.monotonic()))
+            child.stdout.close()
+            child.stderr.close()
+
+
+def classify_database_error(error):
+    original = getattr(error, 'original_exception', error)
+    seen = set()
+    nested = original
+    while nested is not None and id(nested) not in seen:
+        seen.add(id(nested))
+        if isinstance(nested, ssl.SSLError):
+            original = nested
+            break
+        nested = nested.__cause__ or nested.__context__
+    if isinstance(original, ssl.SSLCertVerificationError):
+        return 'tls_identity'
+    if isinstance(original, ssl.SSLError):
+        return 'tls'
+    if isinstance(original, socket.gaierror):
+        return 'dns'
+    if isinstance(original, (TimeoutError, socket.timeout)):
+        return 'timeout'
+    if isinstance(original, ConnectionRefusedError):
+        return 'refused'
+    code = error.args[0] if error.args else None
+    if code in (1044, 1045, 1698):
+        return 'authentication'
+    if code == 2026:
+        return 'tls_required'
+    if code in (2013, 2006):
+        return 'timeout'
+    return 'execution'
+
+
+def connect_to_database(config_path=str(DEFAULT_CACTI_CONFIG), *, database_config=None,
+                        php_binary='php', deadline=None):
+    cfg = database_config if database_config is not None else parse_cacti_config(config_path, php_binary, deadline)
+    remaining = min(2, (deadline-time.monotonic()) if deadline else 2)
+    if remaining <= 0:
+        raise DatabaseConfigError('timeout', 'connect')
+    kwargs = dict(host=cfg['host'], port=cfg['port'], user=cfg['username'], password=cfg['password'],
+                  database=cfg['database'], charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor,
+                  connect_timeout=remaining, read_timeout=remaining, write_timeout=remaining,
+                  ssl_disabled=not cfg['tls'])
+    if cfg.get('unix_socket'):
+        kwargs['unix_socket'] = cfg['unix_socket']
+    if cfg['tls']:
+        try:
+            if cfg.get('ca'):
+                context = ssl.create_default_context(cafile=cfg['ca'])
             else:
-                raise ValueError(f"Required config value not found: database_{key}")
-
-        return config
-
-    except Exception as e:
-        logger.error(f"Error parsing Cacti config: {e}")
-        raise
-
-
-def connect_to_database(config_path: str = str(DEFAULT_CACTI_CONFIG)):
-    """
-    Connect to Cacti database using credentials from config file.
-
-    Args:
-        config_path: Path to Cacti config.php file
-
-    Returns:
-        pymysql connection object
-
-    Raises:
-        Exception: If connection fails
-    """
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+        except ssl.SSLError:
+            raise DatabaseConfigError('tls_identity', 'configuration') from None
+        except OSError:
+            raise DatabaseConfigError('permissions', 'configuration') from None
+        if cfg.get('cert'):
+            try:
+                # A callable password prevents OpenSSL's interactive key prompt.
+                context.load_cert_chain(cfg['cert'], cfg['key'], password=lambda: b'')
+            except (OSError, ssl.SSLError):
+                raise DatabaseConfigError('tls_client', 'configuration') from None
+        kwargs['ssl'] = context
     try:
-        import pymysql
-    except ImportError:
-        logger.error("pymysql not installed. Install with: pip install pymysql")
-        raise ImportError("pymysql module not found")
-
-    config = parse_cacti_config(config_path)
-
-    try:
-        conn = pymysql.connect(
-            host=config['hostname'],
-            user=config['username'],
-            password=config['password'],
-            database=config['database'],
-            charset='utf8mb4',
-            cursorclass=pymysql.cursors.DictCursor
-        )
-        return conn
-    except Exception as e:
-        logger.error(f"Database connection failed: {e}")
-        raise
+        return pymysql.connect(**kwargs)
+    except Exception as error:
+        raise DatabaseConfigError(classify_database_error(error), 'connect') from None
 
 
 def get_data_source_metrics(local_data_id: int, db_conn) -> Tuple[List[str], str, Dict[str, str]]:
@@ -370,12 +486,12 @@ def read_daemon_storage(device_id: int, storage_dir: str = None, max_retries: in
                 time.sleep(0.2)
             continue
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in storage file: {e}")
+            logger.error("Invalid daemon storage JSON")
             return None
         except Exception as e:
             last_error = e
             if attempt < max_retries - 1:
-                logger.debug(f"Error reading storage file (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.debug("Storage read retry")
                 time.sleep(0.2)
             continue
 
@@ -383,7 +499,7 @@ def read_daemon_storage(device_id: int, storage_dir: str = None, max_retries: in
     if isinstance(last_error, FileNotFoundError):
         logger.error(f"Storage file not found after {max_retries} attempts: {storage_path}")
     else:
-        logger.error(f"Error reading storage file after {max_retries} attempts: {last_error}")
+        logger.error("Storage read failed")
     return None
 
 
@@ -416,7 +532,7 @@ def check_staleness(data: Dict[str, Any], threshold: int = 30) -> bool:
         return False
 
     except (ValueError, AttributeError) as e:
-        logger.error(f"Invalid timestamp format: {e}")
+        logger.error("Invalid daemon timestamp")
         return True
 
 
@@ -476,7 +592,7 @@ def extract_metrics_from_raw(raw_data: Dict[str, Any], instance_identifier: str,
             f"Extracted {len(metrics)} metrics for instance={instance_identifier}: {list(metrics.keys())}"
         )
     except Exception as e:
-        logger.error(f"Error extracting metrics: {e}", exc_info=True)
+        logger.error("Metric extraction failed")
 
     return metrics
 
@@ -531,7 +647,7 @@ def output_cacti_format(metrics: Dict[str, Any]):
             value = value.strip('"')
             # For numeric strings, keep as-is; for text, skip in Cacti output
             if not value.replace('.', '').replace('-', '').isdigit():
-                logger.debug(f"Skipping non-numeric value: {field_name}={value}")
+                logger.debug("Skipping non-numeric metric")
                 continue
 
         safe_name = sanitize_field_name(field_name)
@@ -539,8 +655,11 @@ def output_cacti_format(metrics: Dict[str, Any]):
 
     # Output to stdout (Cacti reads this)
     output = ' '.join(output_pairs)
+    if not output_pairs:
+        return False
     print(output)
-    logger.debug(f"Output: {output}")
+    logger.debug("Metric stdout emitted")
+    return True
 
 
 # ============================================================================
@@ -629,7 +748,7 @@ def format_history_line(epoch: int, metrics: Dict[str, Any],
         if isinstance(value, str):
             value = value.strip('"')
             if not value.replace('.', '').replace('-', '').isdigit():
-                logger.debug(f"Skipping non-numeric value: {metric_name}={value}")
+                logger.debug("Skipping non-numeric metric")
                 continue
 
         # Get field name from mapping, or sanitize metric name
@@ -745,9 +864,12 @@ def main():
     parser.add_argument(
         '--config-path',
         type=str,
-        default=str(DEFAULT_CACTI_CONFIG),
+        default=None,
         help=f'Path to Cacti config.php (default: {DEFAULT_CACTI_CONFIG})'
     )
+
+    parser.add_argument('--database-config-stdin', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--php-binary', default='php', help='CLI PHP executable for trusted standalone config')
 
     parser.add_argument(
         '--staleness-threshold',
@@ -774,24 +896,37 @@ def main():
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
+    if args.database_config_stdin and args.config_path is not None:
+        report_error(DatabaseConfigError())
+        sys.exit(1)
+    deadline = time.monotonic() + 8
+    def expired(signum, frame):
+        raise DatabaseConfigError('timeout', 'execution')
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, 8)
     db_conn = None
 
     try:
         # Connect to database
         try:
-            db_conn = connect_to_database(args.config_path)
+            if args.database_config_stdin:
+                cfg = validate_database_config(sys.stdin.buffer.read(CONFIG_LIMIT + 1))
+                db_conn = connect_to_database(database_config=cfg, deadline=deadline)
+            else:
+                db_conn = connect_to_database(args.config_path or str(DEFAULT_CACTI_CONFIG),
+                                             php_binary=args.php_binary, deadline=deadline)
         except Exception as e:
-            logger.error(f"Failed to connect to database: {e}")
+            report_error(e if isinstance(e, DatabaseConfigError) else DatabaseConfigError('execution', 'connect'))
             sys.exit(1)
 
         # Query database for expected metrics and instance
         try:
             expected_metrics, instance_identifier, field_to_metric_map = get_data_source_metrics(args.local_data_id, db_conn)
         except ValueError as e:
-            logger.error(f"Failed to get data source metrics: {e}")
+            report_error(DatabaseConfigError('metadata', 'metadata'))
             sys.exit(1)
         except Exception as e:
-            logger.error(f"Database query error: {e}", exc_info=True)
+            report_error(DatabaseConfigError('metadata', 'metadata'))
             sys.exit(1)
 
         # Read daemon storage
@@ -808,13 +943,7 @@ def main():
         # Check daemon status
         daemon_status = data.get('daemon_status', 'unknown')
         if daemon_status != 'connected':
-            last_error = str(data.get('last_error') or '').replace('\n', ' ')[:300]
-            tls_policy = data.get('tls_cipher_policy', 'default')
-            detail = f", last_error={last_error}" if last_error else ""
-            logger.warning(
-                f"Daemon not connected: status={daemon_status}, "
-                f"tls_cipher_policy={tls_policy}{detail}"
-            )
+            logger.warning('Daemon is not connected')
             sys.exit(2)  # Not connected - no valid data
 
         # History output mode - output all buffered samples with timestamps
@@ -895,19 +1024,28 @@ def main():
             output_metrics[field_name] = value
 
         # Output in Cacti format (field names)
-        output_cacti_format(output_metrics)
-
+        if output_cacti_format(output_metrics) is False:
+            sys.exit(1)
         sys.exit(0)
 
     except KeyboardInterrupt:
         logger.info("Interrupted")
         sys.exit(1)
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        report_error(e if isinstance(e, DatabaseConfigError) else DatabaseConfigError('execution', 'execution'))
         sys.exit(1)
     finally:
-        if db_conn:
-            db_conn.close()
+        try:
+            if db_conn:
+                if time.monotonic() >= deadline and hasattr(db_conn, '_force_close'):
+                    db_conn._force_close()
+                else:
+                    db_conn.close()
+        except Exception:
+            if db_conn and hasattr(db_conn, '_force_close'):
+                db_conn._force_close()
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
 
 
 if __name__ == '__main__':

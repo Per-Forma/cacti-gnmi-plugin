@@ -124,7 +124,7 @@ for script_item in \
 	DAEMON_README.md README.md __init__.py analyze_daemon_logs.py \
 	check_data_continuity.py gnmi_connection_test.py gnmi_daemon.py \
 	gnmi_daemon_ctl.py gnmi_daemon_monitor.py gnmi_poller_bridge.py \
-	gnmi_runtime.py gnmi_tls.py requirements.txt requirements-installed.txt; do
+	gnmi_runtime.py gnmi_tls.py gnmi_database_config.php requirements.txt requirements-installed.txt; do
 	cp "$PLUGIN_DIR/scripts/$script_item" "$PACKAGE_DIR/gnmi/scripts/"
 done
 cp -R "$PLUGIN_DIR/scripts/gnmi_collector/." "$PACKAGE_DIR/gnmi/scripts/gnmi_collector/"
@@ -146,7 +146,9 @@ fi
 for required_file in \
 	"LICENSE" "gnmi/LICENSE" "gnmi/INFO" "gnmi/setup.php" \
 	"gnmi/ajax_handler.php" "gnmi/include/subscription_actions.php" \
-	"gnmi/scripts/requirements.txt" "gnmi/scripts/gnmi_tls.py" "RELEASE_NOTES.md"; do
+	"gnmi/scripts/requirements.txt" "gnmi/scripts/gnmi_tls.py" \
+	"gnmi/scripts/gnmi_database_config.php" "gnmi/include/database_config.php" \
+	"gnmi/include/poller_bridge.php" "RELEASE_NOTES.md"; do
 	if [ ! -f "$PACKAGE_DIR/$required_file" ]; then
 		echo "ERROR: required package file is missing: $required_file" >&2
 		exit 1

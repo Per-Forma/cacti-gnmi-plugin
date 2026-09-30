@@ -7,6 +7,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Use the poller's actual database connection metadata through private pipes,
+  preserving PHP password bytes, ports, Unix sockets and explicit database TLS.
+- Replace standalone PHP-text parsing with a bounded CLI-only resolver and
+  contain configuration/driver errors without leaking secrets into metrics or logs.
+- Share collection deadlines across all sources, drain subprocess streams,
+  discard failed output, and resume deferred sources with protected fair progress.
+
+
 ## [1.0.0-beta.3] - 2026-09-09
 
 ### Added

@@ -36,6 +36,9 @@ if ($mode === 'prepare') {
         'plugin_gnmi_devices');
     package_require($device_id > 0, 'Cannot create device fixture');
     echo json_encode(array('host_id'=>$host_id, 'device_id'=>(int)$device_id));
+} elseif ($mode === 'enable') {
+    api_plugin_enable('gnmi');
+    package_require(api_plugin_is_enabled('gnmi'), 'Cannot enable plugin through the supported Cacti API');
 } elseif ($mode === 'snapshot') {
     require_once './plugins/gnmi/setup.php';
     require_once './plugins/gnmi/include/functions.php';

@@ -7,6 +7,8 @@ if (!defined('CACTI_VERSION')) {
 	die('Access denied');
 }
 
+require_once __DIR__ . '/poller_bridge.php';
+
 // Constants for template/data input provisioning
 if (!defined('GNMI_DATA_INPUT_NAME')) {
 	define('GNMI_DATA_INPUT_NAME', 'gNMI - Passthrough');
@@ -437,10 +439,13 @@ function gnmi_with_poller_exclusive_lock(callable $fn, $lock_path = null, $block
 		return false;
 	}
 
+	$previous_lock_state = $GLOBALS['gnmi_poller_lock_held'] ?? false;
+	$GLOBALS['gnmi_poller_lock_held'] = true;
 	try {
 		$fn();
 		return true;
 	} finally {
+		$GLOBALS['gnmi_poller_lock_held'] = $previous_lock_state;
 		flock($fh, LOCK_UN);
 		fclose($fh);
 	}
@@ -1825,7 +1830,7 @@ function gnmi_check_subscription_config_changed($device_id, $db_subscriptions = 
  * Called by poller_bottom hook every 10 seconds (when Cacti configured for 10s polling).
  * Ensures all enabled gNMI devices have running daemons, then collects telemetry.
  */
-function gnmi_manage_daemons() {
+function gnmi_manage_daemons($collection_target = null) {
 	global $config;
 
 	// Load status_functions so gnmi_log_event() is available during poller cycles
@@ -1906,7 +1911,7 @@ function gnmi_manage_daemons() {
 	}
 
 	// After managing daemons, collect telemetry data
-	gnmi_collect_telemetry();
+	gnmi_collect_telemetry($collection_target);
 }
 
 /**
@@ -4525,251 +4530,252 @@ function gnmi_auto_create_missing_graphs() {
  *
  * @return bool Success status
  */
-function gnmi_collect_telemetry() {
-	global $config;
+function gnmi_collect_telemetry($inherited_target = null) {
+    global $config;
+    $target = gnmi_bridge_target($inherited_target, gnmi_get_poller_interval());
+    // Direct trusted calls participate in the same lock and fairness state as the hook.
+    if (empty($GLOBALS['gnmi_poller_lock_held'])) {
+        $result = false;
+        gnmi_with_poller_exclusive_lock(function () use ($target, &$result) { $result = gnmi_collect_telemetry($target); });
+        return $result;
+    }
+    $defer = function () {
+        cacti_log('gNMI: '.gnmi_bridge_diagnostic('deferred'), false, 'POLLER', POLLER_VERBOSITY_LOW);
+        return false;
+    };
+    if (gnmi_bridge_now() >= $target) return $defer();
+    if (!function_exists('proc_open')) {
+        cacti_log('gNMI: configuration: '.gnmi_bridge_diagnostic('execution'), false, 'POLLER', POLLER_VERBOSITY_LOW);
+        return false;
+    }
+    $template_id = gnmi_get_passthrough_data_template_id();
+    if (empty($template_id)) return false;
+    if (gnmi_bridge_now() >= $target) return $defer();
+    gnmi_auto_create_missing_data_sources();
+    if (gnmi_bridge_now() >= $target) return $defer();
+    gnmi_auto_create_missing_graphs();
+    if (gnmi_bridge_now() >= $target) return $defer();
+    $pairs = db_fetch_assoc_prepared("SELECT gd.id AS device_id, dl.id AS local_data_id, dtd.name AS data_source_label
+        FROM plugin_gnmi_devices gd
+        INNER JOIN data_local dl ON dl.host_id=gd.host_id
+        INNER JOIN data_template_data dtd ON dtd.local_data_id=dl.id
+        WHERE gd.enabled=1 AND dl.data_template_id=?
+        GROUP BY gd.id, dl.id, dtd.name", [$template_id]);
+    if (gnmi_bridge_now() >= $target) return $defer();
+    if (empty($pairs)) return true;
+    $storage_dir = gnmi_get_storage_dir();
+    try {
+        $cursor = gnmi_bridge_cursor_read($storage_dir);
+        if (!is_writable($storage_dir)) throw new GnmiBridgeMaintenanceException();
+        $pairs = gnmi_bridge_order_pairs($pairs, $cursor);
+    } catch (GnmiBridgeMaintenanceException $error) {
+        cacti_log('gNMI: '.gnmi_bridge_diagnostic('maintenance'), false, 'POLLER', POLLER_VERBOSITY_LOW);
+        return false;
+    }
+    try {
+        $payload = json_encode(gnmi_export_database_config(), JSON_THROW_ON_ERROR);
+    } catch (Throwable $error) {
+        $category = $error instanceof GnmiDatabaseConfigException ? $error->category : 'configuration';
+        cacti_log('gNMI: configuration: '.gnmi_bridge_diagnostic($category), false, 'POLLER', POLLER_VERBOSITY_LOW);
+        return false;
+    }
+    if (gnmi_bridge_now() >= $target) return $defer();
+    $python = gnmi_get_python_binary();
+    $script = $config['base_path'].'/plugins/gnmi/scripts/gnmi_poller_bridge.py';
+    if ($python === false || !is_executable($python) || !is_readable($script)) {
+        cacti_log('gNMI: configuration: '.gnmi_bridge_diagnostic('execution'), false, 'POLLER', POLLER_VERBOSITY_LOW);
+        return false;
+    }
+    $poll_results = [];
+    foreach ($pairs as $pair) {
+        if ($target - gnmi_bridge_now() < .2) { $defer(); break; }
+        $device_id = (int)$pair['device_id'];
+        $local_data_id = (int)$pair['local_data_id'];
+        $result = gnmi_run_bridge([$python, $script, '--device-id', (string)$device_id,
+            '--local-data-id', (string)$local_data_id, '--storage-dir', $storage_dir,
+            '--database-config-stdin', '--staleness-threshold', (string)(gnmi_get_poller_interval()*2),
+            '--output-history'], $payload, $target);
+        if ($result['category'] === 'deferred') { $defer(); break; }
+        $poll_results[$device_id] = $poll_results[$device_id] ?? false;
+        try {
+            gnmi_bridge_cursor_write($storage_dir, [$device_id, $local_data_id]);
+        } catch (GnmiBridgeMaintenanceException $error) {
+            cacti_log('gNMI: '.gnmi_bridge_diagnostic('maintenance'), false, 'POLLER', POLLER_VERBOSITY_LOW);
+            break;
+        }
+        if ($result['exit_code'] !== 0) {
+            if ($result['exit_code'] !== 2) {
+                cacti_log("gNMI: bridge device=$device_id data_source=$local_data_id phase=".$result['phase'].': '.
+                    gnmi_bridge_diagnostic($result['category']), false, 'POLLER', POLLER_VERBOSITY_LOW);
+            }
+            // Configuration/connection failures are shared; retry on the next normal cycle.
+            if (in_array($result['phase'], ['configuration','resolver','connect'], true)) break;
+            continue;
+        }
+        if (gnmi_bridge_now() >= $target) { $defer(); break; }
+        if (gnmi_apply_bridge_output($result['stdout'], $local_data_id, $device_id, $pair['data_source_label'], $target)) {
+            $poll_results[$device_id] = true;
+        }
+    }
+    foreach ($poll_results as $device_id=>$success) {
+        if (gnmi_bridge_now() >= $target) break;
+        db_execute_prepared('UPDATE plugin_gnmi_devices SET last_poll_time=NOW(), last_poll_status=? WHERE id=?',
+            [$success ? 'success' : 'error', $device_id]);
+    }
+    return true;
+}
 
-	cacti_log('gNMI: gnmi_collect_telemetry() called', false, 'POLLER', POLLER_VERBOSITY_LOW);
+/** Only successful stdout reaches this boundary; retain ordered backfill and RRD recovery. */
+function gnmi_apply_bridge_output($output, $local_data_id, $device_id, $ds_label, $target) {
+    if (gnmi_bridge_now() >= $target || $output === '') return false;
 
-	$template_id = gnmi_get_passthrough_data_template_id();
-	if (empty($template_id)) {
-		cacti_log('gNMI: Cannot collect telemetry - passthrough data template missing', false, 'POLLER', POLLER_VERBOSITY_LOW);
+	// Parse multi-line output: "EPOCH field:value field:value" per line
+	// This format supports RRD backfill with multiple timestamped samples
+	$lines = explode("\n", trim($output));
+	$timestamped_samples = array();  // Array of [epoch => [field => value, ...]]
+
+	foreach ($lines as $line) {
+		$line = trim($line);
+		if (empty($line)) continue;
+
+		// Split into epoch and metrics: "1738561003 in_octets:123 out_octets:456"
+		$parts = explode(' ', $line, 2);
+		if (count($parts) != 2 || !ctype_digit($parts[0])) return false;
+
+		$epoch = intval($parts[0]);
+		if ($epoch < 1000000000) return false;  // Basic validation (> year 2001)
+
+		$metrics_str = $parts[1];
+		$pairs = explode(' ', $metrics_str);
+		$metrics = array();
+
+		foreach ($pairs as $pair) {
+			if (strpos($pair, ':') !== false) {
+				list($field_name, $value) = explode(':', $pair, 2);
+				if (!preg_match('/^[A-Za-z0-9_]{1,19}$/D', $field_name) ||
+					($value !== 'U' && (!is_numeric($value) || !is_finite((float)$value)))) return false;
+				$metrics[$field_name] = $value;
+			} else { return false; }
+		}
+
+		if (!empty($metrics)) {
+			$timestamped_samples[$epoch] = $metrics;
+		}
+	}
+
+	if (empty($timestamped_samples)) {
+		cacti_log("gNMI: No timestamped samples parsed from bridge output for data source $local_data_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
 		return false;
 	}
 
-	// Check for subscriptions that need data sources auto-created
-	gnmi_auto_create_missing_data_sources();
+	// Sort by epoch (chronological order - required by rrdtool)
+	ksort($timestamped_samples);
 
-	// Check for metrics that need graphs auto-created
-	gnmi_auto_create_missing_graphs();
+	cacti_log("gNMI: Parsed " . count($timestamped_samples) . " timestamped samples for data source $local_data_id ($ds_label)", false, 'POLLER', POLLER_VERBOSITY_LOW);
 
-	// Get all enabled gNMI devices
-	$devices = db_fetch_assoc('SELECT * FROM plugin_gnmi_devices WHERE enabled = 1');
+	// Get field count from first sample for validation
+	$first_sample = reset($timestamped_samples);
+	$metrics = $first_sample;  // For compatibility with downstream code that expects $metrics
 
-	if (empty($devices)) {
-		cacti_log('gNMI: No enabled devices found for telemetry collection', false, 'POLLER', POLLER_VERBOSITY_LOW);
+	if (empty($metrics)) {
+		cacti_log("gNMI: No metrics parsed from bridge output for data source $local_data_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
+		return false;
+	}
+
+	cacti_log("gNMI: Parsed " . count($metrics) . " metrics for data source $local_data_id ($ds_label)", false, 'POLLER', POLLER_VERBOSITY_LOW);
+
+	// Bridge outputs all metrics for this data source
+	if (gnmi_bridge_now() >= $target) return false;
+	// Get all expected field names for this data source to validate
+	$ds_fields = db_fetch_assoc("
+		SELECT data_source_name
+		FROM data_template_rrd
+		WHERE local_data_id = $local_data_id
+	");
+
+	// Build values array matching RRD data source order
+	$values = array();
+	foreach ($ds_fields as $ds_field) {
+		$field_name = $ds_field['data_source_name'];
+		if (isset($metrics[$field_name])) {
+			$values[$field_name] = $metrics[$field_name];
+		}
+	}
+
+	if (empty($values)) {
+		cacti_log("gNMI: No matching metrics for data source $local_data_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
+		return false;
+	}
+
+	if (gnmi_bridge_now() >= $target) return false;
+	// Create RRD files if needed and write data directly
+	cacti_log("gNMI: Processing DS $local_data_id ($ds_label) with " . count($values) . " values", false, 'POLLER', POLLER_VERBOSITY_LOW);
+	// Resolve the path through Cacti so legacy rows with a blank
+	// data_source_path use Cacti's established fallback generation.
+	$rrd_path = get_data_source_path($local_data_id, true);
+
+	if (empty($rrd_path)) {
+		cacti_log("gNMI: No RRD path found for DS $local_data_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
+		return false;
+	}
+
+	$oldest_epoch = 0;
+	foreach ($timestamped_samples as $sample_epoch => $unused_sample) {
+		$oldest_epoch = (int)$sample_epoch;
+		break;
+	}
+	if (gnmi_bridge_now() >= $target) return false;
+	if (!gnmi_prepare_rrd_file(
+		$rrd_path,
+		(int)$local_data_id,
+		$ds_label,
+		$oldest_epoch
+	)) {
+		return false;
+	}
+
+	if (gnmi_bridge_now() >= $target) return false;
+	// Write directly to RRD file
+	// Build rrdupdate command with multiple timestamps for RRD backfill
+	// Format: rrdtool update file.rrd EPOCH1:val1:val2 EPOCH2:val1:val2 ...
+
+	// Get all RRD data source names in order (needed for value ordering)
+	$rrd_items = db_fetch_assoc("
+		SELECT data_source_name
+		FROM data_template_rrd
+		WHERE local_data_id = $local_data_id
+		ORDER BY id
+	");
+
+	// Build update command with all timestamped samples
+	// Using --skip-past-updates to ignore samples that are older than last RRD update
+	$update_cmd = "rrdtool update --skip-past-updates " . escapeshellarg($rrd_path);
+
+	$update_count = 0;
+	foreach ($timestamped_samples as $epoch => $sample_metrics) {
+		// Build value string for this timestamp
+		$val_str = $epoch;
+		foreach ($rrd_items as $item) {
+			$ds_name = $item['data_source_name'];
+			$val = isset($sample_metrics[$ds_name]) ? $sample_metrics[$ds_name] : 'U';
+			$val_str .= ":" . $val;
+		}
+		$update_cmd .= ' ' . escapeshellarg($val_str);
+		$update_count++;
+	}
+
+	if (gnmi_bridge_now() >= $target) return false;
+	// Execute update with all timestamped samples in one call
+	cacti_log("gNMI: Executing RRD update with $update_count samples: " . substr($update_cmd, 0, 200) . "...", false, 'POLLER', POLLER_VERBOSITY_LOW);
+	if (gnmi_update_rrd_with_recovery(
+		$update_cmd,
+		$rrd_path,
+		(int)$local_data_id,
+		$ds_label,
+		$oldest_epoch
+	)) {
+		cacti_log("gNMI: Updated DS $local_data_id ($ds_label) with $update_count timestamped samples for device $device_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
 		return true;
 	}
-
-	cacti_log('gNMI: Collecting telemetry from ' . count($devices) . ' device(s)', false, 'POLLER', POLLER_VERBOSITY_LOW);
-
-	$python_bin = gnmi_get_python_binary();
-	if ($python_bin === false) {
-		cacti_log('gNMI: Cannot collect telemetry - virtual environment not found', false, 'POLLER', POLLER_VERBOSITY_LOW);
-		return;
-	}
-
-	$script_path = $config['base_path'] . '/plugins/gnmi/scripts/gnmi_poller_bridge.py';
-	$cacti_config_path = $config['base_path'] . '/include/config.php';
-
-	foreach ($devices as $device) {
-		$device_id = $device['id'];
-		$cacti_host_id = $device['host_id'];  // FK to Cacti's host table (new consolidated table field)
-
-		// Get data sources for this device
-		$data_sources = db_fetch_assoc_prepared(
-			"SELECT
-				dl.id AS local_data_id,
-				dtd.name AS data_source_label
-			FROM data_local dl
-			INNER JOIN data_template_data dtd ON dl.id = dtd.local_data_id
-			WHERE dl.host_id = ?
-			  AND dl.data_template_id = ?
-			GROUP BY dl.id, dtd.name",
-			array($cacti_host_id, $template_id)
-		);
-
-		if (empty($data_sources)) {
-			cacti_log("gNMI: No data sources found for device $device_id (host $cacti_host_id)", false, 'POLLER', POLLER_VERBOSITY_LOW);
-			continue;
-		}
-
-		cacti_log("gNMI: Found " . count($data_sources) . " data source(s) for device $device_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
-
-		// Call bridge once per data source (Option A architecture)
-		// This supports future per-data-source query intervals
-		$storage_dir = gnmi_get_storage_dir();
-		$device_poll_success = false;
-		foreach ($data_sources as $ds) {
-			$local_data_id = $ds['local_data_id'];
-			$ds_label = $ds['data_source_label'];
-
-		// Build command: bridge queries database for this data source's metrics
-		// Use --output-history to get all buffered samples with timestamps for RRD backfill
-		// Pass staleness threshold so bridge skips stale data at any poller interval
-		$cmd = escapeshellarg($python_bin) . " " . escapeshellarg($script_path) .
-		       " --device-id " . escapeshellarg($device_id) .
-		       " --local-data-id " . escapeshellarg($local_data_id) .
-		       " --storage-dir " . escapeshellarg($storage_dir) .
-		       " --config-path " . escapeshellarg($cacti_config_path) .
-		       " --staleness-threshold " . escapeshellarg(gnmi_get_poller_interval() * 2) .
-		       " --output-history" .
-		       " 2>&1";
-
-			// Execute poller bridge for this data source
-			$output = shell_exec($cmd);
-
-			if (empty($output)) {
-				cacti_log("gNMI: No output from bridge for data source $local_data_id (device $device_id)", false, 'POLLER', POLLER_VERBOSITY_LOW);
-				continue;
-			}
-
-			// Check if output contains data (format: "EPOCH field:value field:value" per line)
-			if (strpos($output, ':') === false) {
-				cacti_log("gNMI: Invalid output from bridge for data source $local_data_id: " . substr($output, 0, 100), false, 'POLLER', POLLER_VERBOSITY_LOW);
-				continue;
-			}
-
-			// Parse multi-line output: "EPOCH field:value field:value" per line
-			// This format supports RRD backfill with multiple timestamped samples
-			$lines = explode("\n", trim($output));
-			$timestamped_samples = array();  // Array of [epoch => [field => value, ...]]
-
-			foreach ($lines as $line) {
-				$line = trim($line);
-				if (empty($line)) continue;
-
-				// Split into epoch and metrics: "1738561003 in_octets:123 out_octets:456"
-				$parts = explode(' ', $line, 2);
-				if (count($parts) != 2) continue;
-
-				$epoch = intval($parts[0]);
-				if ($epoch < 1000000000) continue;  // Basic validation (> year 2001)
-
-				$metrics_str = $parts[1];
-				$pairs = explode(' ', $metrics_str);
-				$metrics = array();
-
-				foreach ($pairs as $pair) {
-					if (strpos($pair, ':') !== false) {
-						list($field_name, $value) = explode(':', $pair, 2);
-						$metrics[trim($field_name)] = trim($value);
-					}
-				}
-
-				if (!empty($metrics)) {
-					$timestamped_samples[$epoch] = $metrics;
-				}
-			}
-
-			if (empty($timestamped_samples)) {
-				cacti_log("gNMI: No timestamped samples parsed from bridge output for data source $local_data_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
-				continue;
-			}
-
-			// Sort by epoch (chronological order - required by rrdtool)
-			ksort($timestamped_samples);
-
-			cacti_log("gNMI: Parsed " . count($timestamped_samples) . " timestamped samples for data source $local_data_id ($ds_label)", false, 'POLLER', POLLER_VERBOSITY_LOW);
-
-			// Get field count from first sample for validation
-			$first_sample = reset($timestamped_samples);
-			$metrics = $first_sample;  // For compatibility with downstream code that expects $metrics
-
-			if (empty($metrics)) {
-				cacti_log("gNMI: No metrics parsed from bridge output for data source $local_data_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
-				continue;
-			}
-
-			cacti_log("gNMI: Parsed " . count($metrics) . " metrics for data source $local_data_id ($ds_label)", false, 'POLLER', POLLER_VERBOSITY_LOW);
-
-			// Bridge outputs all metrics for this data source
-			// Get all expected field names for this data source to validate
-			$ds_fields = db_fetch_assoc("
-				SELECT data_source_name
-				FROM data_template_rrd
-				WHERE local_data_id = $local_data_id
-			");
-
-			// Build values array matching RRD data source order
-			$values = array();
-			foreach ($ds_fields as $ds_field) {
-				$field_name = $ds_field['data_source_name'];
-				if (isset($metrics[$field_name])) {
-					$values[$field_name] = $metrics[$field_name];
-				}
-			}
-
-			if (empty($values)) {
-				cacti_log("gNMI: No matching metrics for data source $local_data_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
-				continue;
-			}
-
-			// Create RRD files if needed and write data directly
-			cacti_log("gNMI: Processing DS $local_data_id ($ds_label) with " . count($values) . " values", false, 'POLLER', POLLER_VERBOSITY_LOW);
-			// Resolve the path through Cacti so legacy rows with a blank
-			// data_source_path use Cacti's established fallback generation.
-			$rrd_path = get_data_source_path($local_data_id, true);
-
-			if (empty($rrd_path)) {
-				cacti_log("gNMI: No RRD path found for DS $local_data_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
-				continue;
-			}
-
-			$oldest_epoch = 0;
-			foreach ($timestamped_samples as $sample_epoch => $unused_sample) {
-				$oldest_epoch = (int)$sample_epoch;
-				break;
-			}
-			if (!gnmi_prepare_rrd_file(
-				$rrd_path,
-				(int)$local_data_id,
-				$ds_label,
-				$oldest_epoch
-			)) {
-				continue;
-			}
-
-			// Write directly to RRD file
-			// Build rrdupdate command with multiple timestamps for RRD backfill
-			// Format: rrdtool update file.rrd EPOCH1:val1:val2 EPOCH2:val1:val2 ...
-
-			// Get all RRD data source names in order (needed for value ordering)
-			$rrd_items = db_fetch_assoc("
-				SELECT data_source_name
-				FROM data_template_rrd
-				WHERE local_data_id = $local_data_id
-				ORDER BY id
-			");
-
-			// Build update command with all timestamped samples
-			// Using --skip-past-updates to ignore samples that are older than last RRD update
-			$update_cmd = "rrdtool update --skip-past-updates " . escapeshellarg($rrd_path);
-
-			$update_count = 0;
-			foreach ($timestamped_samples as $epoch => $sample_metrics) {
-				// Build value string for this timestamp
-				$val_str = $epoch;
-				foreach ($rrd_items as $item) {
-					$ds_name = $item['data_source_name'];
-					$val = isset($sample_metrics[$ds_name]) ? $sample_metrics[$ds_name] : 'U';
-					$val_str .= ":" . $val;
-				}
-				$update_cmd .= ' ' . escapeshellarg($val_str);
-				$update_count++;
-			}
-
-			// Execute update with all timestamped samples in one call
-			cacti_log("gNMI: Executing RRD update with $update_count samples: " . substr($update_cmd, 0, 200) . "...", false, 'POLLER', POLLER_VERBOSITY_LOW);
-			if (gnmi_update_rrd_with_recovery(
-				$update_cmd,
-				$rrd_path,
-				(int)$local_data_id,
-				$ds_label,
-				$oldest_epoch
-			)) {
-				cacti_log("gNMI: Updated DS $local_data_id ($ds_label) with $update_count timestamped samples for device $device_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
-				$device_poll_success = true;
-			}
-		}
-
-		// Update last_poll_time and last_poll_status for this device
-		$poll_status = $device_poll_success ? 'success' : 'error';
-		db_execute_prepared(
-			'UPDATE plugin_gnmi_devices SET last_poll_time = NOW(), last_poll_status = ? WHERE id = ?',
-			array($poll_status, $device_id)
-		);
-		cacti_log("gNMI: Updated poll status for device $device_id: $poll_status", false, 'POLLER', POLLER_VERBOSITY_LOW);
-	}
-
-	return true;
+	return false;
 }

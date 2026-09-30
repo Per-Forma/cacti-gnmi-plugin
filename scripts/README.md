@@ -24,14 +24,14 @@ scripts/
 **System Requirements:**
 - Python 3.12 or higher
 - rrdtool system package with development headers
-- PHP CLI (for plugin development and linting)
+- PHP CLI 8.1+ for standalone bridge config evaluation and development; normal polling requires `proc_open()` in its PHP SAPI
 
 **macOS Installation:**
 ```bash
 # Install rrdtool via Homebrew
 brew install rrdtool
 
-# Install PHP (optional, for plugin development)
+# Install CLI PHP for standalone bridge tests
 brew install php
 ```
 
@@ -206,7 +206,7 @@ gnmi_poller_bridge.py --device-id 1 --local-data-id 6
 ```
 
 **How It Works:**
-1. Connects to Cacti database using credentials from config.php
+1. Connects using the PHP poller's selected connection metadata; standalone tests evaluate trusted config.php with CLI PHP
 2. Queries database for expected metrics and instance identifier for the data source
 3. Reads daemon JSON storage file for the device
 4. Filters metrics to only those expected for this data source
@@ -216,6 +216,9 @@ gnmi_poller_bridge.py --device-id 1 --local-data-id 6
 - Success: Field-value pairs to stdout (e.g., `in_octets:123456 out_octets:789012`)
 - Failure: Non-zero exit code with error message to stderr
 - Exit code 2: Stale data (daemon not connected or data too old)
+
+See [database configuration](../docs/bridge_database.md) for TLS/socket behavior,
+CLI PHP prerequisites, diagnostics and polling deadlines.
 
 **Database Queries:**
 - Queries `data_template_rrd` and `plugin_gnmi_metrics` to get expected metrics
