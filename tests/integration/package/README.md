@@ -14,7 +14,7 @@ tests/integration/package/accept.sh \
 ```
 
 The runner validates both checksum layers, deploys only the archive's runtime,
-adds test fixtures separately, installs the plugin, and runs the existing PHP
+adds test fixtures separately, installs the plugin without `--allperms`, explicitly grants fixture realms, and runs the existing PHP
 harnesses plus authenticated HTTP management acceptance. It then disables,
 uninstalls, and reinstalls the plugin, checking daemon and metadata cleanup.
 It creates disposable administrative credentials and a restricted test user;
@@ -27,7 +27,11 @@ versions, and focused test results are retained. No cookies, request bodies,
 credentials, or device configuration files are included in evidence.
 
 CI builds and inspects one archive in Repository hygiene, transfers it as an
-artifact, and tests those bytes in Cacti 1.2.31 PHP harnesses. Development
+artifact, and tests those bytes in Cacti 1.2.25 and 1.2.31 PHP harnesses.
+The dashboard runner verifies restricted sessions, effective group/graph/device
+policies, valid-CSRF forged targets, read-only diagnostics, configured guest/no-auth
+behavior, and permission revocation. Cron is stopped in these disposable stacks
+to keep mutation-denial state assertions deterministic. Development
 archives have a `-dirty` suffix and must never be published.
 
 ## Release gate
@@ -58,3 +62,8 @@ HEAD and run `deployment/package_release.sh 1.0.0-beta.3` without
 A failed candidate requires a fix through a checked PR and fresh artifact
 acceptance. Do not push or replace a public tag for a failed candidate. This
 procedure does not validate upgrades or production readiness.
+
+Both tested Cacti versions reset authentication-disabled mode to local
+authentication and password repair. The plugin preserves that behavior and
+denies explicit mutations from the unfinished password-change session. This
+acceptance does not establish an independent no-auth dashboard mode.

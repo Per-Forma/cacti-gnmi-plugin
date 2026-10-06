@@ -215,7 +215,7 @@ function test_format_event_data() {
 // Test 10: Empty devices handled gracefully
 function test_empty_devices() {
 	$html = gnmi_render_summary_table(array());
-	assert_true(strpos($html, 'No gNMI devices') !== false, "Empty array should show 'No gNMI devices' message");
+	assert_true(strpos($html, 'No accessible gNMI devices are currently enabled.') !== false, "Empty authorized result uses a non-disclosing message");
 }
 
 // Test 11: Legacy TLS policy is visible without changing health status

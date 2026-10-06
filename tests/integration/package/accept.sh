@@ -48,6 +48,9 @@ docker cp "$package/gnmi/." "$container:$plugin/"
 # Test fixtures are separate from the archive and add no runtime implementation.
 docker cp "$repo_root/tests" "$container:$plugin/tests"
 docker cp "$script_dir/fixture.php" "$container:/tmp/package-fixture.php"
+docker cp "$script_dir/access_fixture.php" "$container:/tmp/access-fixture.php"
+# Keep background collection from racing deterministic mutation-denial assertions.
+docker exec -u root "$container" service cron stop
 docker exec -u root "$container" chown -R www-data:www-data "$plugin"
 stage=legacy_preflight
 docker exec -u www-data "$container" php "$plugin/tests/integration/cacti_compat/test_legacy_schema_guard_real.php"
@@ -58,8 +61,7 @@ fixture() {
   docker exec -u www-data -e PACKAGE_FIXTURE_MODE="$1" -e CACTI_ADMIN_PASSWORD "$container" php /tmp/package-fixture.php
 }
 stage=install
-manage --install --allperms
-manage --enable --allperms
+manage --install --enable
 fixture installed
 docker exec "$container" php -v >"$evidence/php-version.txt"
 docker exec "$container" "$plugin/venv/bin/python3" --version >"$evidence/python-version.txt"
@@ -78,6 +80,8 @@ export CACTI_ADMIN_PASSWORD
 CACTI_ADMIN_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
 fixture prepare >"$work/fixture.json"
 python3 "$script_dir/http_acceptance.py" "$url" "$work/fixture.json" >"$evidence/http.txt" 2>&1
+stage=dashboard_http
+python3 "$script_dir/dashboard_acceptance.py" "$container" "$url" >"$evidence/dashboard-http.txt" 2>&1
 fixture snapshot >"$work/resources.json"
 docker cp "$work/resources.json" "$container:/tmp/package-resources.json"
 stage=disable
@@ -92,7 +96,7 @@ assert_stopped() {
   fi
 }
 assert_stopped
-manage --enable --allperms
+fixture enable
 fixture installed
 stage=uninstall
 manage --disable
@@ -100,8 +104,7 @@ manage --uninstall
 assert_stopped
 fixture uninstalled >"$evidence/lifecycle.txt"
 stage=reinstall
-manage --install --allperms
-manage --enable --allperms
+manage --install --enable
 fixture installed >>"$evidence/lifecycle.txt"
 stage=complete
 echo 'PASS: packaged install, HTTP management, disable, uninstall and reinstall'

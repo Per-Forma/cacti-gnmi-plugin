@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 import http.cookiejar
 import json
 import os
+import re
 from pathlib import Path
 import urllib.error
 import urllib.parse
@@ -38,7 +39,14 @@ class Session:
         except urllib.error.HTTPError as error:
             response = error
         with response:
-            return response.status, response.read().decode(), response.headers.get_content_type()
+            body = response.read().decode()
+            content_type = response.headers.get_content_type()
+            if content_type == 'text/html':
+                token = Inputs(body).values.get('__csrf_magic', '')
+                match = re.search(r'var csrfMagicToken\s*=\s*[\'\"]([^\'\"]+)', body)
+                if token or match:
+                    self.token = token or match[1]
+            return response.status, body, content_type
 
     def login(self, username, password):
         status, html, _ = self.request('index.php')

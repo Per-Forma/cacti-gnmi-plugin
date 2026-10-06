@@ -7,6 +7,8 @@ if (!defined('CACTI_VERSION')) {
 	die('Access denied');
 }
 
+require_once __DIR__ . '/access.php';
+
 // Constants for template/data input provisioning
 if (!defined('GNMI_DATA_INPUT_NAME')) {
 	define('GNMI_DATA_INPUT_NAME', 'gNMI - Passthrough');
@@ -113,7 +115,8 @@ function gnmi_validate_csrf_request() {
 		return (bool)csrf_check(false);
 	}
 
-	return isset($_POST['__csrf_magic']) && $_POST['__csrf_magic'] !== '';
+	// A token cannot authorize a request without Cacti's validator.
+	return false;
 }
 
 /**
@@ -157,11 +160,11 @@ function gnmi_current_user_can_manage($realm_file = 'ajax_handler.php') {
  * @return bool True if logged in and assigned the plugin realm
  */
 function gnmi_current_user_has_plugin_realm($realm_file) {
-	if (PHP_SAPI === 'cli') {
+	if (!gnmi_web_authorization_required()) {
 		return true;
 	}
 
-	if (!isset($_SESSION['sess_user_id']) || (int)$_SESSION['sess_user_id'] === 0) {
+	if (!gnmi_authenticated_operator()) {
 		return false;
 	}
 
@@ -1602,7 +1605,7 @@ function gnmi_find_orphan_processes() {
  *
  * @return int Number of orphans cleaned up
  */
-function gnmi_cleanup_orphans() {
+function gnmi_cleanup_orphans($manual = false, &$result = null) {
 	$storage_dir = gnmi_get_storage_dir();
 	$logs_dir = gnmi_get_logs_dir();
 	$orphans_killed = 0;
@@ -1615,6 +1618,7 @@ function gnmi_cleanup_orphans() {
 
 	// Merge both lists
 	$orphans = array_merge($orphans_from_files, $orphans_from_processes);
+	$result = array('orphans_found' => count($orphans), 'processes_stopped' => 0);
 
 	if (empty($orphans)) {
 		return 0;  // No orphans to clean up
@@ -1676,7 +1680,7 @@ function gnmi_cleanup_orphans() {
 	cacti_log("gNMI: Orphan cleanup complete - removed " . count($orphans) . " orphan(s), killed $orphans_killed process(es)", false, 'POLLER', POLLER_VERBOSITY_MEDIUM);
 
 	// Phase 3.2: Log orphan cleanup event
-	if ($orphans_killed > 0 && function_exists('gnmi_log_event')) {
+	if (!$manual && $orphans_killed > 0 && function_exists('gnmi_log_event')) {
 		$first_device_id = !empty($orphans) ? $orphans[0]['device_id'] : 0;
 		gnmi_log_event($first_device_id, 'orphan_cleanup', array(
 			'orphans_cleaned' => count($orphans),
@@ -1685,6 +1689,7 @@ function gnmi_cleanup_orphans() {
 		));
 	}
 
+	$result['processes_stopped'] = $orphans_killed;
 	return $orphans_killed;
 }
 
@@ -2048,14 +2053,15 @@ function gnmi_restart_daemon(array $device) {
  * 3. Process with that PID exists
  * 4. Process is actually gnmi_daemon.py (not another process)
  *
- * Side Effects: Removes stale or invalid PID files
+ * Side Effects: Removes stale/wrong-process PID files when cleanup is enabled
  *
  * @param int $device_id Device ID
  * @param string $pid_file Path to PID file
+ * @param bool $cleanup Permit removal (false for dashboard inspection)
  * @return array Status array with keys: 'status', 'pid'
  *               Possible statuses: 'valid', 'missing', 'stale', 'wrong_process', 'invalid'
  */
-function gnmi_validate_pid_file($device_id, $pid_file) {
+function gnmi_validate_pid_file($device_id, $pid_file, $cleanup = true) {
 	// Check if file exists
 	if (!file_exists($pid_file)) {
 		return array('status' => 'missing', 'pid' => null);
@@ -2076,7 +2082,7 @@ function gnmi_validate_pid_file($device_id, $pid_file) {
 	if (!posix_kill($pid, 0)) {
 		// Process doesn't exist - stale PID file
 		cacti_log("gNMI: Stale PID file for device $device_id (PID $pid not running)", false, 'POLLER', POLLER_VERBOSITY_DEBUG);
-		@unlink($pid_file);
+		if ($cleanup) { @unlink($pid_file); }
 		return array('status' => 'stale', 'pid' => $pid);
 	}
 
@@ -2087,7 +2093,7 @@ function gnmi_validate_pid_file($device_id, $pid_file) {
 		$cmdline = @file_get_contents($cmdline_file);
 		if ($cmdline && strpos($cmdline, 'gnmi_daemon.py') === false) {
 			cacti_log("gNMI: PID $pid is not a gNMI daemon (device $device_id)", false, 'POLLER', POLLER_VERBOSITY_LOW);
-			@unlink($pid_file);
+			if ($cleanup) { @unlink($pid_file); }
 			return array('status' => 'wrong_process', 'pid' => $pid);
 		}
 	}
@@ -2532,9 +2538,9 @@ function gnmi_dependency_state_is_ready($state) {
  * Unified dependency state checker.
  *
  * Checks all dependencies and updates settings flags.
- * Automatically continues setup when system dependencies become available.
+ * Diagnostic calls never create a venv or install packages.
  *
- * @param bool $auto_remediate If true, attempts auto-install of Python deps
+ * @param bool $auto_remediate If true, permits venv creation and Python dependency installation
  * @return array State array for every required system and Python dependency
  */
 function gnmi_check_all_dependencies($auto_remediate = false) {
@@ -2562,9 +2568,9 @@ function gnmi_check_all_dependencies($auto_remediate = false) {
 		return $state;
 	}
 
-	// Step 2: Try to create venv if it doesn't exist
+	// Step 2: Create a missing venv only on explicit remediation
 	$python_bin = gnmi_get_python_binary();
-	if ($python_bin === false) {
+	if ($python_bin === false && $auto_remediate) {
 		$venv_created = gnmi_ensure_venv();
 		if ($venv_created) {
 			$python_bin = gnmi_get_python_binary();
@@ -2654,65 +2660,36 @@ function gnmi_requirements_ok() {
 	return $state['all_ok'];
 }
 
+/** Recovery cannot modify administrator-owned code or dependency trees. */
+function gnmi_dependency_recovery_is_writable() {
+	global $config;
+	$plugin_dir = $config['base_path'] . '/plugins/gnmi';
+	$venv_dir = $plugin_dir . '/venv';
+	if (!is_writable($plugin_dir)) { return false; }
+	if (is_dir($venv_dir)) {
+		foreach (array($venv_dir, $venv_dir . '/bin', $venv_dir . '/lib') as $path) {
+			if (!is_writable($path)) { return false; }
+		}
+		// pip writes beneath lib/python*/site-packages, not just the venv root.
+		foreach (glob($venv_dir . '/lib/python*/site-packages') ?: array() as $path) {
+			if (!is_writable($path)) { return false; }
+		}
+	}
+	return true;
+}
+
 /**
- * Auto-continue setup when system dependencies become available.
+ * Continue setup on an explicitly authorized recovery path.
+ * Web callers must check installation authority and daemon management first.
+ * Protected code/venv requires administrator shell repair.
  *
- * Called from runtime banner display or poller hook to detect when
- * user has installed missing system dependencies and automatically
- * continue plugin setup (create venv, install Python deps).
- *
- * @return bool True if setup was continued, false if nothing to do
+ * @return bool True when dependency readiness improves
  */
 function gnmi_auto_continue_setup() {
-	// Check current state
-	$dep_state = gnmi_check_all_dependencies(false);
-
-	// If venv module was missing but is now available, try to create venv
-	if (!$dep_state['venv_module']) {
-		// Re-check venv module
-		$venv_module_now = gnmi_is_venv_module_available();
-		if ($venv_module_now) {
-			cacti_log('gNMI Plugin: python3-venv now available, attempting to create virtual environment...', false, 'INSTALL', POLLER_VERBOSITY_MEDIUM);
-			$venv_created = gnmi_ensure_venv();
-			if ($venv_created) {
-				// Update state
-				db_execute_prepared("REPLACE INTO settings (name, value) VALUES ('gnmi_req_venv_module_missing', '0')");
-				// Re-run dependency check with auto-remediation
-				$dep_state = gnmi_check_all_dependencies(true);
-				return true;
-			}
-		}
-		return false;
-	}
-
-	// If venv exists and rrdtool dev packages are now available, try installing rrdtool
-	$python_bin = gnmi_get_python_binary();
-	if ($python_bin !== false && !$dep_state['rrdtool_dev']) {
-		$rrdtool_dev_now = gnmi_is_rrdtool_dev_available() && gnmi_is_python_dev_available();
-		if ($rrdtool_dev_now) {
-			cacti_log('gNMI Plugin: RRDtool dev packages now available, attempting to auto-install rrdtool...', false, 'INSTALL', POLLER_VERBOSITY_MEDIUM);
-			db_execute_prepared("REPLACE INTO settings (name, value) VALUES ('gnmi_req_rrdtool_dev_missing', '0')");
-			// Re-run dependency check with auto-remediation
-			$dep_state = gnmi_check_all_dependencies(true);
-			return true;
-		}
-	}
-
-	// If venv exists and Python deps are missing, try auto-install
-	if ($python_bin !== false && (!$dep_state['rrdtool'] || !$dep_state['pygnmi'] || !$dep_state['pymysql'])) {
-		// Re-run with auto-remediation
-		$old_state = $dep_state;
-		$dep_state = gnmi_check_all_dependencies(true);
-
-		// Check if state changed
-		if ($old_state['rrdtool'] != $dep_state['rrdtool'] ||
-			$old_state['pygnmi'] != $dep_state['pygnmi'] ||
-			$old_state['pymysql'] != $dep_state['pymysql']) {
-			return true;
-		}
-	}
-
-	return false;
+	$before = gnmi_check_all_dependencies(false);
+	if ($before['all_ok'] || !gnmi_dependency_recovery_is_writable()) { return false; }
+	$after = gnmi_check_all_dependencies(true);
+	return $before !== $after;
 }
 
 /**
