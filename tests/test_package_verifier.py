@@ -67,7 +67,9 @@ def test_rejects_unlisted_file(tmp_path):
 def test_accepts_complete_package(tmp_path):
     names = ('MANIFEST.md', 'RELEASE_NOTES.md', 'gnmi/INFO', 'gnmi/setup.php',
              'gnmi/ajax_handler.php', 'gnmi/include/subscription_actions.php',
-             'gnmi/scripts/requirements.txt', 'gnmi/scripts/gnmi_daemon.py')
+             'gnmi/scripts/requirements.txt', 'gnmi/scripts/gnmi_daemon.py',
+             'gnmi/scripts/gnmi_database_config.php', 'gnmi/include/database_config.php',
+             'gnmi/include/poller_bridge.php')
     archive, checksum = make_archive(tmp_path, {name: b'fixture' for name in names})
     root = verifier.verify(archive, checksum, tmp_path / 'out')
     assert (root / 'gnmi/ajax_handler.php').read_bytes() == b'fixture'

@@ -10,54 +10,31 @@ import pytest
 from scripts import gnmi_poller_bridge as bridge
 
 
-def test_parse_cacti_config_reads_required_php_values(tmp_path):
-    config = tmp_path / "config.php"
-    config.write_text(
-        "$database_hostname = 'db';\n"
-        '$database_default = "cacti";\n'
-        "$database_username='user';\n"
-        "$database_password = 'secret';\n"
-    )
-    assert bridge.parse_cacti_config(str(config)) == {
-        "hostname": "db", "database": "cacti", "username": "user", "password": "secret",
-    }
+def test_parse_cacti_config_rejects_unavailable_php(tmp_path):
+    with pytest.raises(bridge.DatabaseConfigError) as caught:
+        bridge.parse_cacti_config(str(tmp_path / "config.php"), str(tmp_path / "missing-php"))
+    assert caught.value.category == "php_unavailable"
 
 
-def test_parse_cacti_config_rejects_missing_file_and_value(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        bridge.parse_cacti_config(str(tmp_path / "missing"))
-    config = tmp_path / "config.php"
-    config.write_text("$database_hostname = 'db';")
-    with pytest.raises(ValueError, match="database_database"):
-        bridge.parse_cacti_config(str(config))
-
-
-def test_connect_to_database_uses_parsed_credentials(monkeypatch):
+def test_connect_to_database_uses_resolved_credentials(monkeypatch):
     connect = Mock(return_value=object())
-    pymysql = ModuleType("pymysql")
-    pymysql.connect = connect
-    pymysql.cursors = SimpleNamespace(DictCursor=object())
-    monkeypatch.setitem(sys.modules, "pymysql", pymysql)
-    monkeypatch.setattr(bridge, "parse_cacti_config", lambda path: {
-        "hostname": "db", "database": "cacti", "username": "u", "password": "p",
+    monkeypatch.setattr(bridge, "pymysql", SimpleNamespace(connect=connect, cursors=SimpleNamespace(DictCursor=object())))
+    monkeypatch.setattr(bridge, "parse_cacti_config", lambda *args: {
+        "host": "db", "port": 4406, "database": "cacti", "username": "u", "password": b"p", "tls": False,
     })
-
     connection = bridge.connect_to_database("config.php")
-
     assert connection is connect.return_value
     assert connect.call_args.kwargs["charset"] == "utf8mb4"
-    assert connect.call_args.kwargs["cursorclass"] is pymysql.cursors.DictCursor
+    assert connect.call_args.kwargs["password"] == b"p"
 
 
-def test_connect_to_database_propagates_driver_failure(monkeypatch):
-    pymysql = ModuleType("pymysql")
-    pymysql.connect = Mock(side_effect=RuntimeError("database down"))
-    pymysql.cursors = SimpleNamespace(DictCursor=object())
-    monkeypatch.setitem(sys.modules, "pymysql", pymysql)
-    monkeypatch.setattr(bridge, "parse_cacti_config", lambda path: {
-        "hostname": "db", "database": "cacti", "username": "u", "password": "p",
+def test_connect_to_database_sanitizes_driver_failure(monkeypatch):
+    monkeypatch.setattr(bridge, "pymysql", SimpleNamespace(
+        connect=Mock(side_effect=RuntimeError("credential-canary")), cursors=SimpleNamespace(DictCursor=object())))
+    monkeypatch.setattr(bridge, "parse_cacti_config", lambda *args: {
+        "host": "db", "port": 4406, "database": "cacti", "username": "u", "password": b"p", "tls": False,
     })
-    with pytest.raises(RuntimeError, match="database down"):
+    with pytest.raises(bridge.DatabaseConfigError, match="execution failed"):
         bridge.connect_to_database()
 
 

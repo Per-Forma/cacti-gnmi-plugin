@@ -14,8 +14,11 @@ tests/integration/package/accept.sh \
 ```
 
 The runner validates both checksum layers, deploys only the archive's runtime,
-adds test fixtures separately, installs the plugin without `--allperms`, explicitly grants fixture realms, and runs the existing PHP
-harnesses plus authenticated HTTP management acceptance. It then disables,
+adds test fixtures separately, installs the plugin without `--allperms`,
+explicitly grants fixture realms, and runs the existing PHP harnesses,
+private bridge PHP contracts, exact RRD samples and first graphs, shared
+failure/recovery, inherited deadlines and fair resumption, resolver HTTP
+refusal, plus authenticated HTTP management acceptance. It then disables,
 uninstalls, and reinstalls the plugin, checking daemon and metadata cleanup.
 It creates disposable administrative credentials and a restricted test user;
 never run it against an existing Cacti deployment.

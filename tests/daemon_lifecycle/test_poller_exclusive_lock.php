@@ -44,11 +44,13 @@ remove_test_lock($lock1);
 
 $executed = 0;
 $ok = gnmi_with_poller_exclusive_lock(function () use (&$executed) {
+	assert_true(!empty($GLOBALS['gnmi_poller_lock_held']), 'lock: bridge cursor writes are admitted only in the callback');
 	$executed++;
 }, $lock1);
 
 assert_true($ok, 'lock: first acquisition returns true');
 assert_true($executed === 1, 'lock: callback ran once');
+assert_true(empty($GLOBALS['gnmi_poller_lock_held']), 'lock: cursor admission is cleared after release');
 
 $executed2 = 0;
 $ok2 = gnmi_with_poller_exclusive_lock(function () use (&$executed2) {
@@ -140,6 +142,7 @@ try {
 }
 
 assert_true($threw, 'exception: callback exception propagated to caller');
+assert_true(empty($GLOBALS['gnmi_poller_lock_held']), 'exception: cursor admission is cleared after throw');
 
 // Lock must be released by finally even though callback threw
 $reacquired = false;

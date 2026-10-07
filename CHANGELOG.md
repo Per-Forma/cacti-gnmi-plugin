@@ -17,6 +17,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   cleanup at installation level with the actor and outcome counts.
 - Keep dashboard PID inspection and dependency diagnosis read-only; protected
   code and venv require administrator shell repair.
+- Use the poller's actual database connection metadata through private pipes,
+  preserving PHP password bytes, ports, Unix sockets and explicit database TLS.
+- Replace standalone PHP-text parsing with a bounded CLI-only resolver and
+  contain configuration/driver errors without leaking secrets into metrics or logs.
+- Share collection deadlines across all sources, drain subprocess streams,
+  discard failed output, and resume deferred sources with protected fair progress.
 
 ### Added
 
