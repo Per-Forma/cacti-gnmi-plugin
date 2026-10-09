@@ -131,6 +131,14 @@ The plugin's runtime directories carry sensitive data:
 | `runtime/logs/` | Per-device daemon logs | Medium (may contain hostnames, errors) |
 
 Recommendations:
+- Keep plugin code and venv administrator-owned and unwritable by the service
+  account. Build the venv on the poller host/container at its final path using
+  the [archive installation flow](install.md); preserve its executable modes.
+- Use the same verified web/poller service UID for this beta path. Runtime
+  directories are service-owned `0750`, ordinary runtime files `0640` and private
+  keys `0600`. Check actual access; a mode listing alone does not prove denial.
+- Test HTTP denial using existing nonsecret JSON/key/log probes before adding
+  credentials. Configure server-level denial when `.htaccess` is ineffective.
 - Ensure these directories are owned by the poller/web user and are **not
   world-readable**; private keys `chmod 600`.
 - Confirm the web server does not serve `runtime/storage/`, `runtime/certs/`, or `runtime/logs/`

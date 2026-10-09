@@ -9,6 +9,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Make archive installation self-contained: verify both checksum layers, reject
+  occupied/symlink destinations, build pinned dependencies at their final Linux
+  path, and keep code/venv administrator-owned with service-owned runtime.
+- Exercise the shipped filesystem/Docker commands, protected dependency repair,
+  runtime HTTP denial, first graphs and ownership after container recreation.
+
 - Filter dashboard rows, details, statistics, and events using Cacti's effective
   device permissions before diagnostic reads. Require the dedicated daemon
   realm and target access for explicit dashboard and AJAX restarts.

@@ -11,7 +11,7 @@
 ### Check Daemon Status
 
 ```bash
-docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py health --device-id 1
+docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py health --device-id 1
 ```
 
 **Expected Output:**
@@ -39,7 +39,7 @@ Look for:
 ### Test Bridge Manually
 
 ```bash
-docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_poller_bridge.py \
+docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_poller_bridge.py \
   --device-id 1 --local-data-id 6
 ```
 
@@ -52,33 +52,34 @@ in_octets:123456789 out_octets:987654321 in_pkts:1234567 out_pkts:9876543
 
 ## Common Issues
 
-### Issue X: Missing Python rrdtool Module
+### Missing dependencies or protected code/venv
 
-Problem:
-- Poller logs: "gNMI: Dependency missing (python3-rrdtool). Skipping daemon management."
-- Installer shows a warning banner: "Missing Python rrdtool module"
+Use the [installation guide](install.md) for administrator shell preparation.
+The service account cannot create or repair a root-owned venv from the dashboard.
+Do not make plugin code writable or install only a system `python3-rrdtool`
+package: the daemon/bridge use `plugins/gnmi/venv/bin/python3`.
 
-Diagnosis:
-```bash
-docker exec cacti_app python3 -c 'import rrdtool' && echo OK || echo MISSING
-```
+1. Disable collection and verify daemon shutdown before changing dependencies.
+2. On the actual Linux host/container, check Python 3.12+ and matching venv,
+   Python development and RRDtool header packages. A missing `Python.h` or
+   `rrd.h` requires administrator package installation, followed by another build.
+3. Repair/create the venv **at its final path**, as the administrator, and install
+   the archive's `scripts/requirements.txt`. Do not move a venv or upgrade live
+   dependencies. Keep code/venv unwritable by the service UID.
+4. Run imports and `pip check` with that venv interpreter **as the actual service
+   account**, as shown in the guide. A root-only successful import is insufficient.
+5. Reinspect the dashboard: dependency banners should clear after manual repair.
+   Enable collection and verify numeric bridge output, RRD samples and graph.
 
-Solution (choose one):
-- Docker (running container):
-```bash
-docker exec -u root cacti_app bash -lc 'apt-get update && apt-get install -y python3-rrdtool'
-```
-- Docker (image hardening): add to `cacti-docker-compose/Dockerfile`:
-```Dockerfile
-RUN apt-get update && apt-get install -y --no-install-recommends python3-rrdtool \
-    && rm -rf /var/lib/apt/lists/*
-```
-- Debian/Ubuntu host: `apt install python3-rrdtool`
-- RHEL/CentOS host: `yum install python3-rrdtool`
+If runtime protection fails, check ownership and `0750` access on runtime and
+its child directories, including writable service-owned deny files. Keep code
+root-owned. For PHP process/stream failures, inspect CLI and actual web/poller
+`disable_functions` independently and confirm required APIs are callable. For
+config/database TLS access failures, check service readability without printing
+secrets or changing an external private key automatically; see
+[database diagnostics](bridge_database.md).
 
-Verification:
-1. Reload the plugin page; the banner disappears.
-2. Poller logs show normal daemon management; daemons start as expected.
+---
 
 ### Issue 0: Plugin Installation Failures
 
@@ -158,7 +159,7 @@ Daemon connection failures create data gaps. When connection resumes, counter de
 **Diagnosis:**
 ```bash
 # Run continuity checker for 5 minutes
-docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/check_data_continuity.py \
+docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/check_data_continuity.py \
   --device-id 1 --duration 300 --threshold 20
 ```
 
@@ -202,7 +203,7 @@ ssl.SSLError: [SSL: SSLV3_ALERT_HANDSHAKE_FAILURE]
 
 2. **Check certificate paths in config:**
    ```bash
-   docker exec cacti_app cat /tmp/gnmi_config.json
+   # Check CA/client paths in the Cacti device form; never print daemon config JSON.
    ```
 
 3. **Verify TLS override matches the certificate SAN:**
@@ -281,14 +282,14 @@ ERROR - Invalid credentials
 **Diagnosis:**
 ```bash
 # Check health with details
-docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py health --device-id 1
+docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py health --device-id 1
 ```
 
 **Solutions:**
 
 1. **If daemon not running:**
    ```bash
-   docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py start \
+   docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py start \
      --device-id 1 --config-file /tmp/gnmi_config.json
    ```
 
@@ -296,16 +297,16 @@ docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daem
    - Check logs for connection errors
    - Restart daemon:
      ```bash
-     docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py restart \
+     docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py restart \
        --device-id 1 --config-file /tmp/gnmi_config.json
      ```
 
 3. **If daemon stuck:**
    - Force kill and restart:
      ```bash
-     docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py stop --device-id 1
+     docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py stop --device-id 1
      sleep 2
-     docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py start \
+     docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py start \
        --device-id 1 --config-file /tmp/gnmi_config.json
      ```
 
@@ -349,7 +350,7 @@ If consistently > 15s:
 **Diagnosis:**
 ```bash
 # Test bridge with debug
-docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_poller_bridge.py \
+docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_poller_bridge.py \
   --device-id 1 --local-data-id 6 --debug
 ```
 
@@ -392,7 +393,7 @@ Continuously monitors daemon health and logs state changes.
 
 **Usage:**
 ```bash
-docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_monitor.py \
+docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_monitor.py \
   --device-id 1 --interval 10 --duration 300
 ```
 
@@ -409,7 +410,7 @@ Detects gaps in data collection.
 
 **Usage:**
 ```bash
-docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/check_data_continuity.py \
+docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/check_data_continuity.py \
   --device-id 1 --duration 300 --threshold 20
 ```
 
@@ -454,7 +455,7 @@ Stress tests the poller bridge.
 ```bash
 # Sequential bridge smoke test
 for i in $(seq 1 100); do
-  docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_poller_bridge.py \
+  docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_poller_bridge.py \
     --device-id 1 --local-data-id 6 >/dev/null || exit 1
 done
 
@@ -503,7 +504,7 @@ together when attaching a sanitized diagnostic set to an issue.
 Add to cron:
 ```bash
 # Check daemon health daily
-0 9 * * * docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py health --device-id 1 | mail -s "gNMI Health" admin@example.com
+0 9 * * * docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py health --device-id 1 | mail -s "gNMI Health" admin@example.com
 ```
 
 ### Weekly Log Analysis
@@ -585,7 +586,7 @@ docker exec cacti_app tail -1000 /var/www/html/cacti/plugins/gnmi/runtime/logs/d
 
 ```bash
 # Restart daemon with debug logging
-docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py restart \
+docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py restart \
   --device-id 1 --config-file /tmp/gnmi_config.json
 
 # View logs with debug info
@@ -602,8 +603,8 @@ mkdir -p ${BUNDLE}
 # Collect files
 docker exec cacti_app cat /var/www/html/cacti/plugins/gnmi/runtime/logs/device_1.log > ${BUNDLE}/daemon.log
 docker exec cacti_app cat /var/www/html/cacti/plugins/gnmi/runtime/storage/device_1.json > ${BUNDLE}/storage.json
-docker exec cacti_app cat /tmp/gnmi_config.json > ${BUNDLE}/config.json
-docker exec cacti_app python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py health --device-id 1 > ${BUNDLE}/health.json
+# Record nonsecret settings manually; never copy daemon configuration credentials.
+docker exec -u www-data cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py health --device-id 1 > ${BUNDLE}/health.json
 
 # Run analysis
 cd /path/to/plugin && source venv/bin/activate

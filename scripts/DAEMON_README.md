@@ -2,6 +2,11 @@
 
 **Status:** Public-beta operator reference
 
+Prepare the administrator-owned venv and service-owned runtime using the
+[archive installation guide](../docs/install.md) before enabling collection.
+Run daemon/bridge utilities with that venv interpreter as the actual poller UID;
+dashboard visits do not install packages into a protected deployment.
+
 ---
 
 ## Overview

@@ -171,3 +171,27 @@ Both tested Cacti versions reset authentication-disabled mode to local
 authentication and password repair. The plugin preserves that behavior and
 denies explicit mutations from the unfinished password-change session. This
 acceptance does not establish an independent no-auth dashboard mode.
+
+
+## Release archive installation acceptance
+
+- Verify the official outer checksum and all internal checksums before copying.
+  Reject a missing helper/member, corruption, symlink/file destination or populated
+  destination. Exercise a path with spaces and a deliberately empty destination.
+- Follow the shipped Linux filesystem and Docker instructions with no checkout
+  helpers. Verify the actual PHP/poller UID, supported Python, matching headers,
+  final venv path, service imports and `pip check` before enabling collection.
+- Confirm root-owned code/venv are unwritable as the service account. Only runtime
+  is service-owned/writable; preserve executable venv files and restrictive keys.
+- Verify existing nonsecret JSON/key/log probes receive HTTP denial without marker
+  disclosure. Remove probes before adding device credentials.
+- With venv missing, viewer GET and authorized protected recovery must not create
+  one. Administrator shell repair must clear banners and restore collection.
+- Confirm subscription/metric setup, numeric bridge output, exact RRD samples and
+  first graph; test a permitted restart and controlled outage/recovery.
+- Disable/uninstall/reinstall without changing code ownership. Recreate the
+  container with deliberate persistent storage; recheck access and first graphs.
+- Run both supported Cacti versions and database port/socket/TLS acceptance.
+  Add the log-retention acceptance when that implementation is integrated.
+  Record source/archive identities and sanitized results; do not count automated
+  command execution as independent new-user usability feedback.

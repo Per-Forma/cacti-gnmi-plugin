@@ -60,9 +60,15 @@ def verify(archive, checksum, destination):
                  'gnmi/ajax_handler.php', 'gnmi/include/subscription_actions.php',
                  'gnmi/scripts/requirements.txt', 'gnmi/scripts/gnmi_daemon.py',
                  'gnmi/scripts/gnmi_database_config.php', 'gnmi/include/database_config.php',
-                 'gnmi/include/poller_bridge.php'):
+                 'gnmi/include/poller_bridge.php', 'docs/install.md', 'gnmi/docs/install.md'):
         if name not in actual:
             raise ValueError('Missing required package file: ' + name)
+    if (root / 'docs/install.md').read_bytes() != (root / 'gnmi/docs/install.md').read_bytes():
+        raise ValueError('Packaged installation guide copies differ')
+    if any(PurePosixPath(name).name == 'BETA_TEST_READINESS_PLAN.md'
+           or re.fullmatch(r'ITEM_[1-4]_[A-Z_]+_SPEC\.md', PurePosixPath(name).name)
+           for name in actual):
+        raise ValueError('Local planning file in package')
     return root
 
 
