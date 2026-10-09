@@ -208,6 +208,9 @@ def validate_packaged_doc_sets(extract_root: Path, source_docs: Path) -> list[st
             issues.append(
                 f"{relative}: missing={missing or 'none'}, unexpected={unexpected or 'none'}"
             )
+        for name in set(actual) & set(expected):
+            if (directory / name).read_bytes() != (source_docs / name).read_bytes():
+                issues.append(f"{relative / name}: content differs from source")
     for relative in (Path("gnmi/SECURITY.md"), Path("gnmi/CONTRIBUTING.md")):
         if not (package_roots[0] / relative).is_file():
             issues.append(f"missing packaged file: {relative}")

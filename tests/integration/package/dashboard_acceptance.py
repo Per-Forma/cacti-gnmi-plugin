@@ -13,11 +13,13 @@ def main():
     parser.add_argument('container')
     parser.add_argument('url')
     parser.add_argument('--reproduce', action='store_true')
+    parser.add_argument('--protected-installation', action='store_true')
     args = parser.parse_args()
     password = secrets.token_urlsafe(32)
 
     def fixture(mode):
-        result = subprocess.run(['docker', 'exec', '-u', 'www-data',
+        user = 'root' if args.protected_installation and mode in ('missing-venv','restore-venv') else 'www-data'
+        result = subprocess.run(['docker', 'exec', '-u', user,
             '-e', 'CACTI_ADMIN_PASSWORD', '-e', 'ACCESS_FIXTURE_MODE=' + mode,
             args.container, 'php', '/tmp/access-fixture.php'],
             env={**os.environ, 'CACTI_ADMIN_PASSWORD': password},
@@ -139,10 +141,20 @@ def main():
             sessions[name].request('plugins/gnmi/index.php')
             assert not fixture('state')['venv_exists'], name + ': GET created venv'
         sessions['admin'].request('plugins/gnmi/index.php')
-        assert fixture('state')['venv_exists'], 'Authorized writable recovery did not create a venv'
+        if args.protected_installation:
+            _, html, _ = sessions['admin'].request('plugins/gnmi/index.php')
+            assert not fixture('state')['venv_exists'], 'Protected installation created a venv'
+            assert 'Administrator shell repair required' in html
+        else:
+            assert fixture('state')['venv_exists'], 'Authorized writable recovery did not create a venv'
     finally:
         fixture('restore-venv')
-    print('PASS: viewer diagnosis creates no venv; authorized writable recovery succeeds')
+    if args.protected_installation:
+        _, html, _ = sessions['admin'].request('plugins/gnmi/index.php')
+        assert 'Administrator shell repair required' not in html, 'Dependency banner survived administrator repair'
+        print('PASS: protected GET/recovery creates no venv; administrator restore clears banner')
+    else:
+        print('PASS: viewer diagnosis creates no venv; authorized writable recovery succeeds')
     # Authorized recovery may still run on a writable installation. Protected
     # code/venv must instead give useful shell remediation without downloads.
     fixture('missing-venv')

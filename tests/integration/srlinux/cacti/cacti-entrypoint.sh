@@ -11,11 +11,12 @@ for directory in \
 	"$CACTI_ROOT/cache/boost" \
 	"$CACTI_ROOT/cache/mibcache" \
 	"$CACTI_ROOT/cache/realtime" \
-	"$CACTI_ROOT/cache/spikekill" \
-	"$CACTI_ROOT/plugins/gnmi"; do
+	"$CACTI_ROOT/cache/spikekill"; do
 	mkdir -p "$directory"
 	chown -R www-data:www-data "$directory"
 done
+# Plugin code/venv remain administrator-owned across container recreation.
+mkdir -p "$CACTI_ROOT/plugins/gnmi"
 
 php /usr/local/lib/cacti-lab/render-config.php
 chown www-data:www-data "$CACTI_ROOT/include/config.php"

@@ -151,9 +151,11 @@ jobs:
       matrix:
         include:
           - cacti: "1.2.25"
+            install_method: native
             commit: 18500fa313a9f1ee1be48aa111c0eeea001010fa
             sha256: 8c5a73bc88258ba29bf33c7f27fb788f3d1fe0d0087e61aa85633af3a9140389
           - cacti: "1.2.31"
+            install_method: docker
             commit: 1e8eaca26b84b128c39ce8cc8ece42d7ff76aac1
             sha256: fcc37e877e3e4c937a9cd245101784bc0961a0652f542660e8dce1e86c4e3a15
     runs-on: ubuntu-latest
@@ -191,6 +193,7 @@ jobs:
           docker compose \
             --env-file tests/integration/cacti_compat/.env \
             -f tests/integration/cacti_compat/compose.yaml \
+            -f tests/integration/package/native-code.compose.yaml \
             up -d --build
           for attempt in $(seq 1 90); do
             health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' gnmi_cacti_ci 2>/dev/null || true)
@@ -211,11 +214,22 @@ jobs:
       - name: Accept the packaged installation
         env:
           PACKAGE_EVIDENCE_DIR: ${{ runner.temp }}/package-evidence
+          PACKAGE_INSTALL_MODE: ${{ matrix.install_method }}
         run: |
           tests/integration/package/accept.sh \
             dist/cacti-gnmi-plugin-1.0.0-beta.3-dirty.tar.gz \
             dist/cacti-gnmi-plugin-1.0.0-beta.3-dirty.tar.gz.sha256 \
             gnmi_cacti_ci http://127.0.0.1:7083/cacti/
+
+      - name: Verify protected installation after container recreation
+        run: |
+          docker compose \
+            --env-file tests/integration/cacti_compat/.env \
+            -f tests/integration/cacti_compat/compose.yaml \
+            -f tests/integration/package/native-code.compose.yaml \
+            up -d --no-deps --force-recreate cacti
+          python3 tests/integration/package/protected_installation.py \
+            gnmi_cacti_ci --after-recreation >"$RUNNER_TEMP/package-evidence/recreation.json"
 
       - name: Accept private database transports from the installed archive
         shell: bash
@@ -242,4 +256,5 @@ jobs:
           docker compose \
             --env-file tests/integration/cacti_compat/.env \
             -f tests/integration/cacti_compat/compose.yaml \
-            down --remove-orphans
+            -f tests/integration/package/native-code.compose.yaml \
+            down --volumes --remove-orphans

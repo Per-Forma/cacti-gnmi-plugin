@@ -181,6 +181,10 @@ class PublicDocumentationTests(unittest.TestCase):
                 [],
                 validate_packaged_doc_sets(root / "extract", source_docs),
             )
+            (package / "gnmi/docs/install.md").write_text("# Stale instructions\n")
+            issues = validate_packaged_doc_sets(root / "extract", source_docs)
+            self.assertTrue(any("content differs" in issue for issue in issues))
+            (package / "gnmi/docs/install.md").write_bytes((source_docs / "install.md").read_bytes())
             (package / "gnmi" / "docs" / "security.md").unlink()
             issues = validate_packaged_doc_sets(root / "extract", source_docs)
             self.assertTrue(any("security.md" in issue for issue in issues))

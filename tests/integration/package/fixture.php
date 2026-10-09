@@ -10,7 +10,18 @@ function package_require($condition, $message) {
 }
 
 $mode = getenv('PACKAGE_FIXTURE_MODE');
-if ($mode === 'prepare') {
+if ($mode === 'probes' || $mode === 'remove-probes') {
+    require_once './plugins/gnmi/include/functions.php';
+    foreach (array('storage/install-probe.json','certs/install-probe.key','logs/install-probe.log') as $probe) {
+        $path = gnmi_get_runtime_dir() . '/' . $probe;
+        if ($mode === 'probes') {
+            package_require(file_put_contents($path, 'gnmi-install-probe') !== false, 'Cannot create nonsecret probe');
+            chmod($path, 0640);
+        } else {
+            package_require(unlink($path), 'Cannot remove nonsecret probe');
+        }
+    }
+} elseif ($mode === 'prepare') {
     $password = getenv('CACTI_ADMIN_PASSWORD');
     package_require(strlen($password ?: '') >= 16, 'A disposable password is required');
     db_execute_prepared("UPDATE user_auth SET password=?, must_change_password='', password_change='', enabled='on' WHERE username='admin'",

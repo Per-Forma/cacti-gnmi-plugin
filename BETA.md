@@ -6,6 +6,12 @@ yet recommended.
 
 ## Before installation
 
+Follow the complete [archive installation guide](docs/install.md), including
+checksum verification, the empty-destination guard and administrator-built
+dependencies. It contains Linux filesystem and Docker command flows. Keep code
+and venv root-owned; pre-create only service-owned runtime before Cacti install.
+No checkout-only deploy script or dashboard package download is required.
+
 - Confirm Cacti 1.2.25 or later, PHP 8.1 or later, and Python 3.12 or later.
 - Back up the Cacti database and RRD directory.
 - Use a dedicated gNMI account with the minimum required device privileges.

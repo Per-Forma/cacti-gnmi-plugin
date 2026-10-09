@@ -86,6 +86,11 @@ def main():
     device = {**host, 'device_id': fixture['device_id']}
     password = os.environ['CACTI_ADMIN_PASSWORD']
     anonymous = Session(args.url)
+    probes = ('storage/install-probe.json','certs/install-probe.key','logs/install-probe.log')
+    for probe in probes:
+        status, body, _ = anonymous.request('plugins/gnmi/runtime/' + probe)
+        assert status in (403,404) and 'gnmi-install-probe' not in body, 'Runtime probe disclosed'
+    print('PASS: existing JSON/key/log probes denied without marker disclosure')
     status, body, content_type = anonymous.request('plugins/gnmi/ajax_handler.php')
     assert status == 405 and content_type == 'application/json'
     assert json.loads(body)['code'] == 'method_not_allowed'
