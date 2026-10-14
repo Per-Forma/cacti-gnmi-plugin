@@ -64,12 +64,35 @@ def test_rejects_unlisted_file(tmp_path):
         verifier.verify(archive, checksum, tmp_path / 'out')
 
 
-def test_accepts_complete_package(tmp_path):
+def complete_files():
     names = ('MANIFEST.md', 'RELEASE_NOTES.md', 'gnmi/INFO', 'gnmi/setup.php',
              'gnmi/ajax_handler.php', 'gnmi/include/subscription_actions.php',
              'gnmi/scripts/requirements.txt', 'gnmi/scripts/gnmi_daemon.py',
              'gnmi/scripts/gnmi_database_config.php', 'gnmi/include/database_config.php',
-             'gnmi/include/poller_bridge.php')
-    archive, checksum = make_archive(tmp_path, {name: b'fixture' for name in names})
+             'gnmi/include/poller_bridge.php', 'docs/install.md', 'gnmi/docs/install.md')
+    return {name: b'fixture' for name in names}
+
+
+def test_accepts_complete_package(tmp_path):
+    archive, checksum = make_archive(tmp_path, complete_files())
     root = verifier.verify(archive, checksum, tmp_path / 'out')
     assert (root / 'gnmi/ajax_handler.php').read_bytes() == b'fixture'
+
+
+def test_rejects_different_installation_instructions(tmp_path):
+    files = complete_files()
+    files['gnmi/docs/install.md'] = b'stale instructions'
+    archive, checksum = make_archive(tmp_path, files)
+    with pytest.raises(ValueError, match='guide copies differ'):
+        verifier.verify(archive, checksum, tmp_path / 'out')
+
+
+@pytest.mark.parametrize('name', ['BETA_TEST_READINESS_PLAN.md',
+    'ITEM_1_DASHBOARD_ACCESS_SPEC.md', 'ITEM_2_POLLER_BRIDGE_DATABASE_SPEC.md',
+    'ITEM_3_RELEASE_INSTALLATION_SPEC.md', 'ITEM_4_DAEMON_LOG_RETENTION_SPEC.md'])
+def test_rejects_checksummed_local_planning_material(tmp_path, name):
+    files = complete_files()
+    files['gnmi/' + name] = b'local planning material'
+    archive, checksum = make_archive(tmp_path, files)
+    with pytest.raises(ValueError, match='Local planning file'):
+        verifier.verify(archive, checksum, tmp_path / 'out')

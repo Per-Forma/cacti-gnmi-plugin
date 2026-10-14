@@ -1,272 +1,343 @@
-# gNMI Plugin — Installation Guide
+# Release archive installation
 
-This guide walks through deploying the Cacti gNMI Telemetry plugin from a clean
-state: installing system prerequisites, deploying the plugin files, installing
-the Python environment, enabling the plugin in Cacti, and configuring your first
-device.
+This public beta is for **fresh test installations only**. Do not install over an
+existing gNMI plugin, migrate an older schema, or use it in production. These
+steps need only the official archive, its checksum, and system prerequisites.
+Contributor deployment and development tests belong in
+[the contribution guide](https://github.com/Per-Forma/cacti-gnmi-plugin/blob/main/CONTRIBUTING.md).
 
-> **Public-beta policy:** Beta artifacts are fresh-install only. Install into a
-> clean test Cacti environment only; do not use them in production or upgrade an
-> existing gNMI plugin deployment. Migration from an earlier plugin schema and
-> automated downgrade are not supported by this public beta.
+## 1. Choose the host and service identity
 
-> **Audience:** Cacti administrators with shell access to the poller host (or
-> the Cacti container). You need `root`/`sudo` to install system packages.
+Require Cacti 1.2.25+, PHP 8.1+ (web/poller and CLI), Python 3.12+, Linux with
+`/proc`, and Cacti's working MySQL/MariaDB connection. See
+[compatibility](compatibility.md) for the tested versions. The package recipe
+below targets **Debian 13**, whose `/usr/bin/python3` is Python 3.13. Other
+systems need a separately verified Python 3.12+ interpreter, matching venv and
+Python development packages, RRDtool headers, and a compiler; do not apply this
+package list to an older Debian, CentOS, or an arbitrary container image.
 
----
+Identify the actual PHP-FPM/Apache worker UID and the Cacti poller scheduler UID
+before choosing `GNMI_SERVICE_USER`. This guide assumes both use the same UID;
+`www-data` is the Debian example. `docker exec` defaults to root and does not
+identify the application user. Different web/poller UIDs need a separately
+validated access policy; group write or `0777` is not a supported shortcut.
 
-## 1. Requirements
+The administrator owns plugin code and its venv. The service account owns only
+runtime state. Preserve existing Cacti database and RRD ownership; verify the
+poller can create/update RRDs without recursively reowning Cacti's `rra/` tree.
+Back up the Cacti database and RRDs before testing. One persistent Python daemon
+runs per enabled device with an enabled subscription and metric. Keep Cacti's
+accepted poller interval; 10-second polling is optional and changes a global
+setting affecting all devices and plugins.
 
-| Component | Minimum | Notes |
-|-----------|---------|-------|
-| Cacti     | 1.2.25+ | Cacti 1.2.25 introduces the data-input removal API required for a safe plugin uninstall. |
-| PHP       | 8.1+    | JSON extension and argument-array `proc_open()` in poller PHP; CLI PHP for standalone bridge tests. |
-| Python    | 3.12+   | Used by the daemon, bridge, and collector modules. |
-| Database  | MySQL 5.7+ / MariaDB 10.2+ | JSON column support required. |
-| OS        | Linux with `/proc` | Daemon health metrics (uptime, memory) read from `/proc`. |
+## 2. Download, verify and stage outside the webroot
 
-Cacti 1.2.24 and earlier are unsupported. They may run the collection path,
-but they lack `api_data_input_remove()`, so this beta cannot guarantee a clean,
-safe uninstall.
+Download the archive and matching `.sha256` from the
+[official releases](https://github.com/Per-Forma/cacti-gnmi-plugin/releases).
+Choose the published version; the example below uses beta.3. These instructions
+also describe the next candidate; an existing published download does not
+acquire later fixes. A `-dirty` archive is a development test artifact, never a
+release. Checksums detect byte changes relative to the downloaded record; obtain
+both files from the trusted release source.
 
-The plugin runs one **long-running Python daemon per gNMI device**. Plan for
-roughly 50–100 MB RAM per daemon and a persistent gRPC connection per device.
-
-### 10-second polling
-
-gNMI is a streaming protocol. To benefit from high-resolution data, set Cacti's
-poller interval to **10 seconds** (Console → Configuration → Settings → Poller).
-This is a global Cacti setting that affects all devices, so review poller load
-and capacity before changing it. The plugin still works at the default 60s
-interval; you simply get coarser graphs.
-
----
-
-## 2. Install system dependencies
-
-These packages provide the runtime libraries and build headers needed to create
-the Python virtual environment and compile the `rrdtool` bindings. They require
-root.
-
-**Debian / Ubuntu:**
-```bash
-sudo apt install python3-venv python3-dev librrd-dev
-```
-
-**RHEL / CentOS / Fedora:**
-```bash
-sudo yum install python3-venv python3-devel rrdtool-devel
-```
-
-**Docker (install as root inside the Cacti container):**
-```bash
-docker exec -u root cacti_app bash -lc \
-  'apt-get update && apt-get install -y python3-venv python3-dev librrd-dev'
-```
-
-| Package | Provides | Needed for |
-|---------|----------|------------|
-| `python3-venv` (or `python3.X-venv`) | `venv` + `ensurepip` | Creating the isolated environment |
-| `python3-dev` / `python3-devel` | `Python.h` headers | Compiling the `rrdtool` C extension |
-| `librrd-dev` / `rrdtool-devel` | `rrd.h` + `librrd` | Building the `rrdtool` Python module |
-
----
-
-## 3. Deploy the plugin files
-
-The plugin must live at `<cacti>/plugins/gnmi/`. Use the bundled
-`deploy_plugin.sh`, which stages only deployable plugin code (excludes
-tests/docs/runtime data/caches/private certs) and supports both local and
-Docker targets.
-
-**Local filesystem:**
-```bash
-./deploy_plugin.sh /var/www/html/cacti/plugins/gnmi/
-```
-
-**Docker container** (`<container>:<path>`):
-```bash
-./deploy_plugin.sh cacti_app:/var/www/html/cacti/plugins/gnmi/
-```
-
-The script does **not** copy certificate or private-key material. After plugin
-install creates the protected runtime tree, place lab/production TLS
-material manually under `plugins/gnmi/runtime/certs/` (or
-`GNMI_RUNTIME_DIR/certs`) and select those files in the device form. See
-[security.md](security.md) §TLS.
-
-Verify the files landed:
-```bash
-# Local
-ls -la /var/www/html/cacti/plugins/gnmi/
-# Docker
-docker exec cacti_app ls -la /var/www/html/cacti/plugins/gnmi/
-```
-
-Before installing/enabling the plugin, the Cacti web/poller user must be able to
-create the protected runtime tree at `plugins/gnmi/runtime/` (or at
-`GNMI_RUNTIME_DIR`). If the plugin directory is `root:root 755`, either install
-from a context with permission to create that directory or pre-create only the
-runtime root with the Cacti runtime user as owner:
+Run as an ordinary shell user in the download directory. GNU tar and GNU
+`sha256sum` are used below. On macOS, `shasum -a 256 -c FILE.sha256` can verify the
+outer checksum, but perform installation and build the venv on the Linux host.
 
 ```bash
-docker exec cacti_app mkdir -p /var/www/html/cacti/plugins/gnmi/runtime
-docker exec cacti_app chown www-data:www-data /var/www/html/cacti/plugins/gnmi/runtime
-docker exec cacti_app chmod 750 /var/www/html/cacti/plugins/gnmi/runtime
+GNMI_RELEASE_VERSION=1.0.0-beta.3
 ```
 
-The plugin install step still creates/protects `runtime/storage`,
-`runtime/certs`, and `runtime/logs`, and aborts if it cannot write the required
-deny files.
+<!-- install-guide:verify -->
+```bash
+set -eu
+GNMI_ARCHIVE="cacti-gnmi-plugin-${GNMI_RELEASE_VERSION}.tar.gz"
+sha256sum -c "$GNMI_ARCHIVE.sha256"
+GNMI_STAGE=$(mktemp -d)
+chmod 700 "$GNMI_STAGE"
+tar --no-same-owner -xzf "$GNMI_ARCHIVE" -C "$GNMI_STAGE"
+GNMI_PACKAGE_DIR="$GNMI_STAGE/cacti-gnmi-plugin-${GNMI_RELEASE_VERSION}"
+(cd "$GNMI_PACKAGE_DIR" && sha256sum -c CHECKSUMS.txt)
+for GNMI_REQUIRED in setup.php INFO scripts/requirements.txt scripts/gnmi_database_config.php include/database_config.php include/poller_bridge.php; do
+  test -f "$GNMI_PACKAGE_DIR/gnmi/$GNMI_REQUIRED" || {
+    echo "Missing archive member: gnmi/$GNMI_REQUIRED" >&2
+    exit 1
+  }
+done
+```
 
----
+Stop on any error, before copying or enabling code. Extract only the official,
+verified archive into a new private staging directory. Keep `MANIFEST.md`,
+`CHECKSUMS.txt`, release notes and the archive checksum outside the webroot with
+your installation record. Install only **`gnmi/.`**, never the outer package
+folder. Continue with either the Linux filesystem or Docker instructions.
 
-## 4. Install the Python environment
+## 3. Linux filesystem installation
 
-The plugin manages a virtual environment at
-`<cacti>/plugins/gnmi/venv/`. When system prerequisites (step 2) are present,
-the plugin **auto-creates the venv and installs packages** during install and
-on page load. You can also do it manually:
+Run the following as the **shell administrator (root)** on the Linux Cacti host.
+For example, use `sudo -i`, then set these variables in that root shell. Set
+`GNMI_PACKAGE_DIR` to the verified staging folder from step 2; if staging was on
+another host, transfer and repeat verification on this host first.
 
 ```bash
-cd /var/www/html/cacti/plugins/gnmi
-python3 -m venv venv
-venv/bin/python3 -m pip install --upgrade pip
-venv/bin/python3 -m pip install -r scripts/requirements.txt
+GNMI_PACKAGE_DIR=/replace/with/verified/staging/cacti-gnmi-plugin-1.0.0-beta.3
+GNMI_PLUGIN_DIR=/var/www/html/cacti/plugins/gnmi
+GNMI_SERVICE_USER=www-data
+GNMI_SERVICE_GROUP=www-data
 ```
 
-Key pinned dependencies (`scripts/requirements.txt`): `pygnmi==0.8.15`,
-`rrdtool-bindings==0.5.0`, `grpcio==1.83.0`, `protobuf==7.35.1`, `pymysql==1.2.0`,
-`pyyaml==6.0.3`.
+Reject a symlink, ordinary file or populated destination. A deliberately
+prepared empty directory is allowed. Keep its parent under administrator control
+throughout copying; this is not a merge-copy or an upgrade procedure.
 
-**Verify the environment:**
+<!-- install-guide:destination -->
 ```bash
-venv/bin/python3 -c "import rrdtool, pygnmi, pymysql; print('OK')"
+set -eu
+if [ -L "$GNMI_PLUGIN_DIR" ]; then
+  echo 'Plugin destination must not be a symlink.' >&2
+  exit 1
+fi
+if [ -e "$GNMI_PLUGIN_DIR" ] && [ ! -d "$GNMI_PLUGIN_DIR" ]; then
+  echo 'Plugin destination must be a directory.' >&2
+  exit 1
+fi
+mkdir -p "$GNMI_PLUGIN_DIR"
+if [ -n "$(find "$GNMI_PLUGIN_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+  echo 'Fresh installation requires an empty plugin directory.' >&2
+  exit 1
+fi
 ```
 
-> The `rrdtool` wheel is compiled from source against `librrd-dev`. If this step
-> fails, re-check step 2 — a missing `librrd-dev`/`python3-dev` is the usual
-> cause.
+<!-- install-guide:native-copy -->
+```bash
+set -eu
+cp -a "$GNMI_PACKAGE_DIR/gnmi/." "$GNMI_PLUGIN_DIR/"
+chown -R root:root "$GNMI_PLUGIN_DIR"
+find "$GNMI_PLUGIN_DIR" -type d -exec chmod 0755 {} +
+find "$GNMI_PLUGIN_DIR" -type f -exec chmod 0644 {} +
+```
 
-The release archive contains runtime dependencies only. Contributors running
-the automated suite should additionally install the development requirements:
+Build dependencies **at the final absolute path**, before installing/enabling
+in Cacti. Do not build on macOS, move a venv, or copy one between hosts or
+containers: installed launchers retain absolute paths. The archive's
+`scripts/requirements.txt` is the authority for all pins; do not install a
+system-only RRDtool Python binding or upgrade pip independently.
+
+<!-- install-guide:native-dependencies -->
+```bash
+set -eu
+apt-get update
+apt-get install -y python3 python3-venv python3-dev librrd-dev build-essential pkg-config
+GNMI_PYTHON=/usr/bin/python3
+"$GNMI_PYTHON" -c 'import sys; assert sys.version_info >= (3, 12), "Python 3.12+ required: " + sys.version'
+"$GNMI_PYTHON" -c 'import pathlib, sysconfig; assert (pathlib.Path(sysconfig.get_path("include")) / "Python.h").is_file(), "Install matching Python development headers"'
+test -f /usr/include/rrd.h || { echo 'Install librrd-dev before building dependencies.' >&2; exit 1; }
+umask 022
+"$GNMI_PYTHON" -m venv "$GNMI_PLUGIN_DIR/venv"
+"$GNMI_PLUGIN_DIR/venv/bin/python3" -m pip install -r "$GNMI_PLUGIN_DIR/scripts/requirements.txt"
+"$GNMI_PLUGIN_DIR/venv/bin/python3" -m pip check
+runuser -u "$GNMI_SERVICE_USER" -- "$GNMI_PLUGIN_DIR/venv/bin/python3" -c 'import sys; assert sys.version_info >= (3, 12); import grpc, pygnmi, pymysql, rrdtool, yaml'
+runuser -u "$GNMI_SERVICE_USER" -- "$GNMI_PLUGIN_DIR/venv/bin/python3" -m pip check
+```
+
+A failed package download/build, unsupported Python, missing headers or failed
+service-account import means stop here. The plugin must remain disabled until
+administrator shell repair succeeds. Do not normalize venv files to `0644`;
+its launchers and interpreter links must remain executable.
+
+Pre-create only the runtime root; the install hook creates/protects its children.
+The CLI check below prints no configuration or credentials. Also inspect the
+effective PHP configuration in the **actual web/poller context**; its ini and
+`disable_functions` may differ from CLI. The PHP process/stream APIs must be
+callable there too. Do not expose a public `phpinfo()` or config dump.
+
+<!-- install-guide:native-runtime -->
+```bash
+set -eu
+install -d -o "$GNMI_SERVICE_USER" -g "$GNMI_SERVICE_GROUP" -m 0750 "$GNMI_PLUGIN_DIR/runtime"
+runuser -u "$GNMI_SERVICE_USER" -- test ! -w "$GNMI_PLUGIN_DIR"
+runuser -u "$GNMI_SERVICE_USER" -- test ! -w "$GNMI_PLUGIN_DIR/venv"
+runuser -u "$GNMI_SERVICE_USER" -- test -w "$GNMI_PLUGIN_DIR/runtime"
+runuser -u "$GNMI_SERVICE_USER" -- test -r "$(dirname "$(dirname "$GNMI_PLUGIN_DIR")")/include/config.php"
+runuser -u "$GNMI_SERVICE_USER" -- php -r '
+if (PHP_VERSION_ID < 80100) { fwrite(STDERR, "PHP CLI 8.1+ required\n"); exit(1); }
+foreach (["proc_open","proc_get_status","proc_terminate","proc_close","stream_select","stream_set_blocking","stream_get_contents","fread","fwrite","feof","hrtime","stream_isatty"] as $api) {
+  if (!is_callable($api)) { fwrite(STDERR, "Required PHP API unavailable: $api\n"); exit(1); }
+}
+echo "PHP CLI process/stream prerequisites OK\n";
+'
+```
+
+## 4. Docker installation
+
+Use a **Debian 13 Cacti image with PHP CLI 8.1+** for this package recipe. Verify
+its Python and actual service UID as in step 1. For another image, obtain matching
+interpreter/venv/header packages first. Verify and stage on the host using step 2,
+then run the following from that host shell:
 
 ```bash
-venv/bin/python3 -m pip install -r scripts/requirements-dev.txt
+GNMI_CONTAINER=cacti_app
+GNMI_PLUGIN_DIR=/var/www/html/cacti/plugins/gnmi
+GNMI_SERVICE_USER=www-data
+GNMI_SERVICE_GROUP=www-data
 ```
 
----
-
-## 5. Enable the plugin in Cacti
-
-1. Log in to Cacti as an admin.
-2. Go to **Console → Configuration → Plugin Management**.
-3. Find **gNMI Telemetry** and click **Install**, then **Enable**.
-
-On install the plugin:
-- Creates its database tables (`plugin_gnmi_devices`, `plugin_gnmi_subscriptions`,
-  `plugin_gnmi_metrics`, and `plugin_gnmi_events`).
-- Registers its poller and form hooks (inactive until the plugin is enabled).
-- Registers the Status Dashboard realm so it appears under **Console → Plugins**.
-- Provisions the `gNMI - Passthrough` data input/template and the graph
-  templates + CDEF/colors used for auto-created graphs.
-
-### Dependency banners
-
-If any prerequisite is still missing, the plugin shows a banner on its pages with
-the exact remediation command, and tracks state in the Cacti `settings` table:
-
-```sql
-SELECT name, value FROM settings WHERE name LIKE 'gnmi_req_%';
+<!-- install-guide:docker-copy -->
+```bash
+set -eu
+docker exec -i -u root "$GNMI_CONTAINER" sh -s -- "$GNMI_PLUGIN_DIR" <<'SH'
+set -eu
+GNMI_PLUGIN_DIR=$1
+if [ -L "$GNMI_PLUGIN_DIR" ]; then echo 'Plugin destination must not be a symlink.' >&2; exit 1; fi
+if [ -e "$GNMI_PLUGIN_DIR" ] && [ ! -d "$GNMI_PLUGIN_DIR" ]; then echo 'Plugin destination must be a directory.' >&2; exit 1; fi
+mkdir -p "$GNMI_PLUGIN_DIR"
+if [ -n "$(find "$GNMI_PLUGIN_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+  echo 'Fresh installation requires an empty plugin directory.' >&2
+  exit 1
+fi
+SH
+docker cp "$GNMI_PACKAGE_DIR/gnmi/." "$GNMI_CONTAINER:$GNMI_PLUGIN_DIR/"
+docker exec -u root "$GNMI_CONTAINER" sh -c '
+set -eu
+chown -R root:root "$1"
+find "$1" -type d -exec chmod 0755 {} +
+find "$1" -type f -exec chmod 0644 {} +
+' sh "$GNMI_PLUGIN_DIR"
 ```
 
-| Flag | `1` means |
-|------|-----------|
-| `gnmi_req_venv_module_missing` | `python3-venv` not available |
-| `gnmi_req_rrdtool_dev_missing` | `librrd-dev`/`python3-dev` not available |
-| `gnmi_req_rrdtool_missing` | `rrdtool` Python module not importable |
-| `gnmi_req_pygnmi_missing` | `pygnmi` not importable |
+<!-- install-guide:docker-dependencies -->
+```bash
+set -eu
+docker exec -u root "$GNMI_CONTAINER" sh -c '
+set -eu
+apt-get update
+apt-get install -y python3 python3-venv python3-dev librrd-dev build-essential pkg-config
+GNMI_PYTHON=/usr/bin/python3
+"$GNMI_PYTHON" -c "import sys; assert sys.version_info >= (3, 12), \"Python 3.12+ required: \" + sys.version"
+"$GNMI_PYTHON" -c "import pathlib, sysconfig; assert (pathlib.Path(sysconfig.get_path(\"include\")) / \"Python.h\").is_file(), \"Install matching Python development headers\""
+test -f /usr/include/rrd.h || { echo "Install librrd-dev before building dependencies." >&2; exit 1; }
+umask 022
+"$GNMI_PYTHON" -m venv "$1/venv"
+"$1/venv/bin/python3" -m pip install -r "$1/scripts/requirements.txt"
+"$1/venv/bin/python3" -m pip check
+' sh "$GNMI_PLUGIN_DIR"
+docker exec -u "$GNMI_SERVICE_USER" "$GNMI_CONTAINER" "$GNMI_PLUGIN_DIR/venv/bin/python3" -c 'import sys; assert sys.version_info >= (3, 12); import grpc, pygnmi, pymysql, rrdtool, yaml'
+docker exec -u "$GNMI_SERVICE_USER" "$GNMI_CONTAINER" "$GNMI_PLUGIN_DIR/venv/bin/python3" -m pip check
+```
 
-Once dependencies are satisfied, refresh the plugin page; the banners clear and
-the poller hook begins managing daemons.
+<!-- install-guide:docker-runtime -->
+```bash
+set -eu
+docker exec -u root "$GNMI_CONTAINER" install -d -o "$GNMI_SERVICE_USER" -g "$GNMI_SERVICE_GROUP" -m 0750 "$GNMI_PLUGIN_DIR/runtime"
+docker exec -u "$GNMI_SERVICE_USER" "$GNMI_CONTAINER" test ! -w "$GNMI_PLUGIN_DIR"
+docker exec -u "$GNMI_SERVICE_USER" "$GNMI_CONTAINER" test ! -w "$GNMI_PLUGIN_DIR/venv"
+docker exec -u "$GNMI_SERVICE_USER" "$GNMI_CONTAINER" test -w "$GNMI_PLUGIN_DIR/runtime"
+docker exec -u "$GNMI_SERVICE_USER" "$GNMI_CONTAINER" test -r "$(dirname "$(dirname "$GNMI_PLUGIN_DIR")")/include/config.php"
+docker exec -u "$GNMI_SERVICE_USER" "$GNMI_CONTAINER" php -r '
+if (PHP_VERSION_ID < 80100) { fwrite(STDERR, "PHP CLI 8.1+ required\n"); exit(1); }
+foreach (["proc_open","proc_get_status","proc_terminate","proc_close","stream_select","stream_set_blocking","stream_get_contents","fread","fwrite","feof","hrtime","stream_isatty"] as $api) {
+  if (!is_callable($api)) { fwrite(STDERR, "Required PHP API unavailable: $api\n"); exit(1); }
+}
+echo "PHP CLI process/stream prerequisites OK\n";
+'
+```
 
----
+Packages/venv in a container's disposable layer disappear on replacement. Put
+this administrator preparation into the site's image build at the **final path**,
+or deliberately persist code/venv and reproduce their ownership. Persist runtime
+separately according to the site's storage policy. Review the entrypoint: it must
+not recursively chown plugin code to the service account on restart/recreation.
+Recheck imports, code/venv nonwritability, runtime protection and collection after
+recreation. Never copy a host venv into the image.
 
-## 6. Configure your first device
+## 5. Install, enable and protect runtime
 
-gNMI is configured **inside Cacti's native device edit form** — there is no
-separate menu.
+All prerequisite steps must pass first. Log in as an authorized Cacti
+administrator, open **Console → Configuration → Plugin Management**, then
+**Install** and **Enable** gNMI Telemetry. Schema installation alone does not
+prove dependencies or collection work. Install creates plugin tables, hooks,
+realms, templates and protected `runtime/storage`, `runtime/logs`, and
+`runtime/certs`. It aborts if required runtime directories/deny files cannot be
+created. Their service ownership permits later reinstall without changing code.
 
-1. **Console → Configuration → Devices**, then create a new device or edit an
-   existing one.
-2. Scroll to the **gNMI Telemetry Configuration** section and check
-   **Enable gNMI Telemetry**.
-3. Fill in the connection settings:
-   - **Hostname/IP** and **Port** (gNMI default is typically `9339`).
-   - **Username** / **Password**.
-   - **Collection Interval** — seconds (5–300; `10` recommended).
-   - **TLS / mTLS** options if your device requires them (see
-     [security.md](security.md)).
-4. **Save.** The plugin starts a daemon for the device within one poller cycle.
-5. Add at least one **subscription** with metrics so the daemon has something to
-   collect (see [user_guide.md](user_guide.md) §Subscriptions). Without an
-   enabled subscription that has metrics, the daemon has nothing to stream and
-   will not start.
+| Path | Ownership and access |
+| --- | --- |
+| Code/docs | `root:root`; directories `0755`, files `0644` |
+| Venv | root-owned; preserve executable modes and links; service can read/execute, cannot write |
+| Runtime directories | service UID/group, `0750` |
+| Runtime deny/config/telemetry/log files | service-owned, normally `0640` |
+| gNMI private keys | service-readable, `0600`; provision manually after HTTP denial is verified |
 
-### Verify data is flowing
+Before adding secrets, create **existing nonsecret probe files** as the service
+account: `runtime/storage/install-probe.json`, `runtime/certs/install-probe.key`,
+and `runtime/logs/install-probe.log`, each containing only `gnmi-install-probe`.
+Request each corresponding URL from an unauthenticated browser/curl and require
+403 or 404 without the marker in the body. A missing-file 404 does not prove
+protection. Delete the probes afterward. If Apache ignores `.htaccess`, configure
+vhost denial; Nginx requires explicit location denial. See [security](security.md).
+
+Use plugin-local runtime for this guide. Optional `GNMI_RUNTIME_DIR` must be one
+absolute path configured consistently in web PHP, CLI installer, scheduler,
+spawned daemons and bridge; an interactive-shell export is insufficient.
+Python-only directory overrides do not configure the whole plugin. External
+runtime still needs installation protection and access checks. Account for OS
+confinement (for example SELinux) without disabling it or widening permissions.
+
+Dashboard visits diagnose dependencies without creating a venv or downloading
+packages. Even an administrator with daemon management cannot repair root-owned
+code/venv from the web. **Administrator shell repair required** means disable
+collection, confirm daemons stopped, repair at the final path using the shipped
+requirements, and repeat service-account imports/`pip check`. Reinspect the page
+after shell repair to clear dependency banners, then enable and verify collection.
+Do not repair a venv while collectors still use it. See [troubleshooting](troubleshooting.md).
+
+## 6. First device and populated graph
+
+Grant the intended operator the relevant **gNMI Telemetry** / **gNMI Status
+Dashboard** page realms and **gNMI Manage Daemons** for restart, together with
+Cacti access to the target device. General device management does not substitute
+for daemon management. Installation authority does not automatically imply daemon
+permissions. Verify using a restricted operator, not an all-permissions account.
+
+In **Console → Configuration → Devices**, enable gNMI on a test device, enter
+its hostname, port, least-privilege device credentials and TLS settings, and save.
+Add an **enabled subscription and metric** using the
+[user guide](user_guide.md). Wait for scheduled polling to start the daemon and
+create its data source/graph. Provision gNMI CA/client files manually in protected
+`runtime/certs`; Cacti **database** TLS files follow Cacti configuration separately
+and must be readable by the bridge UID. Do not change external private-key
+ownership automatically. See [database settings](bridge_database.md).
+
+The gNMI device ID is shown in the plugin's device/dashboard links. Obtain the
+Cacti `local_data_id` from the corresponding Data Sources edit link (`id=`).
+Replace both example IDs below. Run with the actual service UID and the venv:
 
 ```bash
-# Daemon health (replace 1 with the device's gNMI id)
-docker exec cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 \
-  /var/www/html/cacti/plugins/gnmi/scripts/gnmi_daemon_ctl.py health --device-id 1
-
-# JSON storage written by the daemon
-docker exec cacti_app cat /var/www/html/cacti/plugins/gnmi/runtime/storage/device_1.json
-
-# Bridge output for a data source (replace local-data-id)
-docker exec cacti_app /var/www/html/cacti/plugins/gnmi/venv/bin/python3 \
-  /var/www/html/cacti/plugins/gnmi/scripts/gnmi_poller_bridge.py \
-  --device-id 1 --local-data-id 6
+# Docker host shell; for a Linux host, use runuser -u "$GNMI_SERVICE_USER" -- COMMAND.
+docker exec -u "$GNMI_SERVICE_USER" "$GNMI_CONTAINER" "$GNMI_PLUGIN_DIR/venv/bin/python3" \
+  "$GNMI_PLUGIN_DIR/scripts/gnmi_daemon_ctl.py" health --device-id 1
+docker exec -u "$GNMI_SERVICE_USER" "$GNMI_CONTAINER" "$GNMI_PLUGIN_DIR/venv/bin/python3" \
+  "$GNMI_PLUGIN_DIR/scripts/gnmi_poller_bridge.py" --device-id 1 --local-data-id 6
 ```
 
-Then open the **Status Dashboard** (Console → Plugins → gNMI Telemetry) to see
-per-device health, daemon uptime, and data freshness.
+Require a connected daemon, fresh storage timestamps, numeric bridge output for
+the chosen data source, **updated RRD samples and a populated graph**. Health
+alone is insufficient. Inspect freshness without dumping daemon config JSON or
+credentials into evidence. After a permitted restart and a controlled connection
+interruption, verify reconnection and graph recovery. Record archive/source SHA,
+versions, service identity, ownership and sanitized results.
 
----
+## 7. Disable, uninstall and replace files
 
-## 7. Upgrading
+From Plugin Management, **Disable**, confirm collectors stopped, then
+**Uninstall**. Lock/stop failures must be resolved before continuing. Uninstall
+removes plugin schema/metadata and selected per-device runtime files; historical
+RRDs remain. Root-owned code and venv also remain: physical removal/replacement is
+an administrator shell operation after successful disable/uninstall and confirmed
+shutdown. Never make code writable to let the web process remove it.
 
-Upgrading an earlier private or development schema is not supported by this
-public beta. The installer detects the retired assignment tables and older
-metric layout before making changes, leaves them untouched, and reports that a
-fresh installation is required.
-
-The idempotent `plugin_gnmi_upgrade()` helpers reconcile additions within the
-current public schema, but they are not a migration path from an older plugin
-design. Back up the Cacti database and RRD directory, uninstall the earlier
-build, and install this beta into a clean plugin schema.
-
----
-
-## 8. Uninstalling
-
-From **Plugin Management**, click **Disable** then **Uninstall**. Uninstall stops
-all daemons, removes hooks, and drops the plugin tables in FK-safe order
-(`plugin_gnmi_subscriptions` before `plugin_gnmi_devices`). RRD files already
-created in `<cacti>/rra/` are **not** deleted — remove them manually if you no
-longer need the historical data. Automated tests cover the dependency order and
-verify that lock or daemon-stop failures abort before metadata or schema removal.
-There is no automated schema downgrade.
-
----
-
-## Related documentation
-
-- [user_guide.md](user_guide.md) — day-to-day device, subscription, and graph management
-- [security.md](security.md) — credential storage, TLS/mTLS, hardening
-- [troubleshooting.md](troubleshooting.md) — diagnostics for common failures
-- [test_plan.md](test_plan.md) — manual validation checklist
-- [architecture.md](architecture.md) — how the daemon → JSON → bridge → RRD pipeline works
-
-The bridge uses Cacti's effective database connection. Verify the actual poller
-account and PHP interpreter as described in [database configuration](bridge_database.md).
+A same-build reinstall can reuse retained code/venv and service-owned runtime.
+Installing a different archive still requires a deliberately empty destination
+and an explicit administrator cleanup decision after uninstall. There is no
+supported production migration, schema upgrade from a private build, merge-copy,
+or automated downgrade. See [test plan](test_plan.md) for acceptance checks.

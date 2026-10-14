@@ -54,18 +54,12 @@ scope of the platform claims.
 
 ## Installation
 
-Install required operating-system packages first. On Debian or Ubuntu:
-
-```bash
-sudo apt install python3-venv python3-dev librrd-dev
-```
-
-Place this repository at `<cacti-root>/plugins/gnmi`, then install and enable
-**gNMI Telemetry** from Cacti's Plugin Management page. The plugin creates its
-isolated Python environment and runtime directories during setup.
-
-Read the complete [installation guide](docs/install.md) before configuring a
-device, especially when using TLS or mutual TLS.
+Start with the official release archive and follow the
+[installation guide](docs/install.md). Verify both checksum layers, copy only
+`gnmi/.` into an empty plugin destination, and build the pinned venv at its final
+path on the Linux poller host/container before enabling the plugin. Code and venv
+remain administrator-owned; only protected runtime state is service-writable.
+Dashboard visits diagnose dependencies; administrator shell repair prepares them.
 
 ## Documentation
 
@@ -81,7 +75,8 @@ device, especially when using TLS or mutual TLS.
 
 ## Development
 
-Create a Python 3.12+ virtual environment and install development
+This section requires a source checkout; development requirements and tests are
+excluded from release archives. Create a Python 3.12+ virtual environment and install development
 dependencies:
 
 ```bash

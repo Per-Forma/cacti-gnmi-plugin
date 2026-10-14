@@ -43,13 +43,12 @@ stage=disposable_preflight
   echo 'Package acceptance requires an empty plugin directory' >&2
   exit 1
 }
-stage=deploy
-docker cp "$package/gnmi/." "$container:$plugin/"
+stage=archive_guide
+python3 "$script_dir/install_from_guide.py" "$package" "$container" --mode "${PACKAGE_INSTALL_MODE:-docker}" >"$evidence/install-guide.txt" 2>&1
 # Test fixtures are separate from the archive and add no runtime implementation.
 docker cp "$repo_root/tests" "$container:$plugin/tests"
 docker cp "$script_dir/fixture.php" "$container:/tmp/package-fixture.php"
 docker cp "$script_dir/access_fixture.php" "$container:/tmp/access-fixture.php"
-docker exec -u root "$container" chown -R www-data:www-data "$plugin"
 # Keep fixture timing independent of the disposable cron scheduler.
 docker exec -u root "$container" service cron stop >/dev/null
 stage=legacy_preflight
@@ -64,6 +63,8 @@ stage=install
 manage --install --enable
 fixture enable
 fixture installed
+stage=protected_installation
+python3 "$script_dir/protected_installation.py" "$container" >"$evidence/ownership.json"
 docker exec "$container" php -v >"$evidence/php-version.txt"
 docker exec "$container" "$plugin/venv/bin/python3" --version >"$evidence/python-version.txt"
 docker exec "$container" "$plugin/venv/bin/python3" -m pip list --format=json >"$evidence/python-packages.json"
@@ -87,9 +88,11 @@ stage=http
 export CACTI_ADMIN_PASSWORD
 CACTI_ADMIN_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
 fixture prepare >"$work/fixture.json"
+fixture probes
 python3 "$script_dir/http_acceptance.py" "$url" "$work/fixture.json" >"$evidence/http.txt" 2>&1
+fixture remove-probes
 stage=dashboard_http
-python3 "$script_dir/dashboard_acceptance.py" "$container" "$url" >"$evidence/dashboard-http.txt" 2>&1
+python3 "$script_dir/dashboard_acceptance.py" "$container" "$url" --protected-installation >"$evidence/dashboard-http.txt" 2>&1
 fixture snapshot >"$work/resources.json"
 docker cp "$work/resources.json" "$container:/tmp/package-resources.json"
 stage=disable
@@ -115,5 +118,6 @@ stage=reinstall
 manage --install --enable
 fixture enable
 fixture installed >>"$evidence/lifecycle.txt"
+python3 "$script_dir/protected_installation.py" "$container" >"$evidence/ownership-reinstall.json"
 stage=complete
 echo 'PASS: packaged install, HTTP management, disable, uninstall and reinstall'

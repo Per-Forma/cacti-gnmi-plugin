@@ -1,0 +1,7 @@
+# A native volume makes service write checks meaningful on Docker Desktop too.
+services:
+  cacti:
+    volumes:
+      - archive_plugin:/var/www/html/cacti/plugins/gnmi
+volumes:
+  archive_plugin: {}

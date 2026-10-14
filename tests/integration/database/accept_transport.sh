@@ -51,7 +51,12 @@ for spec in "$database:/sock/mysql.sock" "$socket_db:/sock/only.sock"; do
     if docker logs "$container" 2>&1 | grep -q "init process done" && docker exec "$container" mariadb --socket="$socket" -uroot -pdisposable-bridge-root -e "SELECT 1" >/dev/null 2>&1; then ready=true; break; fi
     sleep 1
   done
-  [[ "$ready" == true ]] || { echo 'Disposable DB startup failed' >&2; exit 1; }
+  [[ "$ready" == true ]] || {
+    echo 'Disposable DB startup failed' >&2
+    docker inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$container" >&2
+    docker logs --tail 30 "$container" >&2
+    exit 1
+  }
 done
 docker exec -u www-data "$client" "$python" /tmp/transport-acceptance.py
 

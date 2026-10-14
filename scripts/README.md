@@ -17,95 +17,30 @@ scripts/
     └── rrd.py                  # RRD file operations
 ```
 
-## Environment Setup
+## Release archive installation
 
-### Prerequisites
+Follow the [archive installation guide](../docs/install.md) for Linux filesystem
+and Docker deployment. The administrator builds `plugins/gnmi/venv` at its final
+absolute path on the actual Linux poller host/container, installs
+`requirements.txt`, and checks imports as the service UID before enabling the
+plugin. Code/venv remain root-owned; only protected runtime is service-writable.
+Do not move a venv from macOS or a temporary build directory into deployment.
 
-**System Requirements:**
-- Python 3.12 or higher
-- rrdtool system package with development headers
-- PHP CLI 8.1+ for standalone bridge config evaluation and development; normal polling requires `proc_open()` in its PHP SAPI
+## Contributor environment
 
-**macOS Installation:**
-```bash
-# Install rrdtool via Homebrew
-brew install rrdtool
+Development requirements and tests are available only in a source checkout;
+they are excluded from release archives. Follow
+[CONTRIBUTING.md](../CONTRIBUTING.md) for local tests and source deployment.
+The directory listing above includes checkout-only `requirements-dev.txt`.
 
-# Install CLI PHP for standalone bridge tests
-brew install php
-```
-
-**Ubuntu/Debian Installation:**
-```bash
-# Install rrdtool development libraries
-sudo apt-get install librrd-dev
-
-# Install PHP CLI
-sudo apt-get install php-cli
-```
-
-**RHEL/CentOS Installation:**
-```bash
-# Install rrdtool development libraries
-sudo yum install rrdtool-devel
-
-# Install PHP CLI
-sudo yum install php-cli
-```
-
-### Python Virtual Environment Setup
-
-1. **Create virtual environment:**
-   ```bash
-   cd /path/to/cacti-plugin/plugins/gnmi
-   python3 -m venv venv
-   ```
-
-2. **Activate virtual environment:**
-   ```bash
-   # macOS/Linux
-   source venv/bin/activate
-
-   # Windows (if applicable)
-   venv\Scripts\activate
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   # macOS (requires CFLAGS for rrdtool headers)
-   export CFLAGS="-I/opt/homebrew/include"
-   export LDFLAGS="-L/opt/homebrew/lib"
-   pip install --upgrade pip
-   pip install -r scripts/requirements.txt
-
-   # Linux (usually works without extra flags)
-   pip install --upgrade pip
-   pip install -r scripts/requirements.txt
-   ```
-
-4. **Verify installation:**
-   ```bash
-   python -c "import rrdtool; import pygnmi; print('✓ All imports successful')"
-   ```
-
-## Dependencies
-
-### Core Dependencies
-- **pygnmi** (0.8.15) - gNMI protocol client library
-- **rrdtool-bindings** (0.5.0) - maintained Python bindings for RRDtool
-- **grpcio** (1.59.3) - gRPC runtime (pygnmi dependency)
-- **protobuf** (5.29.6) - Protocol buffers (pygnmi dependency)
-
-### Testing Dependencies
-- **pytest** (9.0.3) - Testing framework
-- **pytest-mock** (3.12.0) - Mocking utilities for pytest
-
-### Utility Dependencies
-- **pyyaml** (6.0.1) - YAML configuration parsing
-- **cryptography** - TLS/certificate handling (resolved pygnmi dependency)
-
-See `requirements-installed.txt` for the resolved runtime dependency tree. Use
-`requirements-dev.txt` when running tests or coverage locally.
+`requirements.txt` is authoritative for runtime pins; `requirements-installed.txt`
+records the resolved runtime tree. `pygnmi` supplies the gNMI client, `grpcio` and
+`protobuf` its transport, `pymysql` the database adapter, `rrdtool-bindings` the
+RRDtool module, and `pyyaml`/`cryptography` supporting utilities. Install the
+pinned file as a unit rather than independently upgrading pip or transitive
+packages. Linux runtime requires Python 3.12+ and PHP CLI 8.1+ for standalone
+bridge config resolution. Normal polling also needs process/stream APIs enabled
+in its actual PHP context.
 
 ## Collector module API
 

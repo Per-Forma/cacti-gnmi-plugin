@@ -5,6 +5,10 @@ Build a development package with `deployment/package_release.sh --allow-dirty
 adjacent `cacti_compat` harness. Use unique container names, state directories,
 and ports. The acceptance runner refuses containers without the
 `com.cacti.gnmi.test=compatibility` label and nonempty plugin directories.
+Use `-f tests/integration/package/native-code.compose.yaml` after the base
+compose file for startup and cleanup. Its native plugin volume makes Unix
+ownership checks meaningful on Docker Desktop too; delete it only with the
+disposable stack (`down --volumes`).
 
 ```bash
 tests/integration/package/accept.sh \
@@ -13,7 +17,13 @@ tests/integration/package/accept.sh \
   gnmi_cacti_ci http://127.0.0.1:7083/cacti/
 ```
 
-The runner validates both checksum layers, deploys only the archive's runtime,
+The runner validates both checksum layers, executes commands extracted from the
+archive's installation guide, and deploys only the archive's runtime. Set
+`PACKAGE_INSTALL_MODE=native` to execute the Linux filesystem recipe inside the
+disposable Linux host; the default executes the Docker host recipe. Both build
+the venv as root at its final path, before any fixture code or Cacti plugin
+installation. This tests command correctness in Linux containers, not a separate
+bare-metal installation or independent new-user usability study. The runner
 adds test fixtures separately, installs the plugin without `--allperms`,
 explicitly grants fixture realms, and runs the existing PHP harnesses,
 private bridge PHP contracts, exact RRD samples and first graphs, shared
@@ -22,6 +32,12 @@ refusal, plus authenticated HTTP management acceptance. It then disables,
 uninstalls, and reinstalls the plugin, checking daemon and metadata cleanup.
 It creates disposable administrative credentials and a restricted test user;
 never run it against an existing Cacti deployment.
+Code/venv remain root-owned and unwritable by the service UID. Only runtime is
+service-owned. HTTP checks use existing nonsecret JSON/key/log probes. Protected
+dependency recovery cannot install packages; administrator restore clears the
+banner. CI recreates the Cacti container and rechecks ownership and first graphs.
+The test entrypoint preserves plugin ownership across recreation. These fixtures
+are never shipped in the release archive.
 
 Evidence defaults to `dist/package-acceptance`; set `PACKAGE_EVIDENCE_DIR` to
 retain each run separately. A nonzero exit or `result.json` status other than

@@ -148,7 +148,7 @@ for required_file in \
 	"gnmi/ajax_handler.php" "gnmi/include/subscription_actions.php" \
 	"gnmi/scripts/requirements.txt" "gnmi/scripts/gnmi_tls.py" \
 	"gnmi/scripts/gnmi_database_config.php" "gnmi/include/database_config.php" \
-	"gnmi/include/poller_bridge.php" "RELEASE_NOTES.md"; do
+	"gnmi/include/poller_bridge.php" "docs/install.md" "gnmi/docs/install.md" "RELEASE_NOTES.md"; do
 	if [ ! -f "$PACKAGE_DIR/$required_file" ]; then
 		echo "ERROR: required package file is missing: $required_file" >&2
 		exit 1
@@ -207,6 +207,7 @@ fi
 
 FORBIDDEN_PATTERN='/((\.)?venv([^/]*)?|runtime|htmlcov|\.pytest_cache|tests)/|\.rrd$|\.pem$|\.key$|\.crt$|\.p12$|\.pfx$|\.pyc$|requirements-dev\.txt$|gnmi_poller\.py$|validate_bridge_|validate_schema\.sql$|^gnmi/test_ajax\.php$|^gnmi/status_test\.php$|^gnmi/subscription_ajax\.php$|^gnmi/subscription_actions(_minimal)?\.php$'
 FORBIDDEN_FILE="/tmp/gnmi_release_forbidden.$$"
+FORBIDDEN_PATTERN="$FORBIDDEN_PATTERN|(^|/)(BETA_TEST_READINESS_PLAN|ITEM_[1-4]_[A-Z_]+_SPEC)\\.md$"
 if find "$PACKAGE_DIR" -type f | sed "s|$PACKAGE_DIR/||" | grep -E "$FORBIDDEN_PATTERN" >"$FORBIDDEN_FILE"; then
 	echo "ERROR: forbidden files detected in prerelease package:" >&2
 	cat "$FORBIDDEN_FILE" >&2
