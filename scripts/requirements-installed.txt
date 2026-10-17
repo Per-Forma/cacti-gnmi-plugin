@@ -3,7 +3,7 @@ cryptography==50.0.2
 dictdiffer==0.10.0
 grpcio==1.84.0
 protobuf==7.36.2
-pycparser==3.0
+pycparser==3.11
 pygnmi==0.8.15
 PyMySQL==1.2.3
 PyYAML==6.0.3
