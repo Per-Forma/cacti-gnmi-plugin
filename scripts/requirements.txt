@@ -3,7 +3,7 @@
 # Install in virtual environment: pip install -r requirements.txt
 
 # Packaging tool retained in the runtime venv
-pip==26.2.1
+pip==26.2.2
 
 # gNMI protocol library
 pygnmi==0.8.15
