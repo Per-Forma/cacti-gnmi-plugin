@@ -96,6 +96,7 @@ if ($host_id === 0) {
 
 // Exercise the same validated plugin save path used by the Cacti device form.
 $_POST = [
+	'gnmi_form_present'    => '1',
 	'gnmi_enabled'         => '1',
 	'gnmi_hostname_source' => 'custom',
 	'gnmi_hostname'        => $target,

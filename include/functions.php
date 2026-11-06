@@ -1405,6 +1405,11 @@ function gnmi_build_daemon_config($device_id) {
 		return false;
 	}
 
+	if ((int) $device['enabled'] !== 1) {
+		cacti_log("gNMI: Not starting collector for disabled device $device_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
+		return false;
+	}
+
 	// Phase 3.3: Get subscriptions from database
 	$subscriptions = db_fetch_assoc_prepared(
 		'SELECT * FROM plugin_gnmi_subscriptions
@@ -1927,6 +1932,16 @@ function gnmi_manage_daemons($collection_target = null) {
 function gnmi_start_daemon(array $device) {
 	global $config;
 
+	$device_id = $device['id'];
+	$enabled_row = db_fetch_row_prepared(
+		'SELECT id, enabled FROM plugin_gnmi_devices WHERE id = ?',
+		array($device_id)
+	);
+	if (!is_array($enabled_row) || (int) $enabled_row['enabled'] !== 1) {
+		cacti_log("gNMI: Not starting collector for disabled device $device_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
+		return false;
+	}
+
 	$python_bin = gnmi_get_python_binary();
 	if ($python_bin === false) {
 		cacti_log("gNMI: Cannot start daemon - virtual environment not found", false, 'POLLER', POLLER_VERBOSITY_LOW);
@@ -1935,7 +1950,6 @@ function gnmi_start_daemon(array $device) {
 
 	$script_path = $config['base_path'] . '/plugins/gnmi/scripts';
 	$daemon_ctl = $script_path . '/gnmi_daemon_ctl.py';
-	$device_id = $device['id'];
 	$storage_dir = gnmi_get_storage_dir();
 	$logs_dir = gnmi_get_logs_dir();
 	$pid_file = "$storage_dir/device_{$device_id}.pid";
@@ -2000,6 +2014,16 @@ function gnmi_start_daemon(array $device) {
 function gnmi_restart_daemon(array $device) {
 	global $config;
 
+	$device_id = $device['id'];
+	$enabled_row = db_fetch_row_prepared(
+		'SELECT id, enabled FROM plugin_gnmi_devices WHERE id = ?',
+		array($device_id)
+	);
+	if (!is_array($enabled_row) || (int) $enabled_row['enabled'] !== 1) {
+		cacti_log("gNMI: Not starting collector for disabled device $device_id", false, 'POLLER', POLLER_VERBOSITY_LOW);
+		return false;
+	}
+
 	// Ensure gnmi_log_event() is available regardless of call context
 	$status_functions_path = $config['base_path'] . '/plugins/gnmi/include/status_functions.php';
 	if (file_exists($status_functions_path) && !function_exists('gnmi_log_event')) {
@@ -2009,7 +2033,6 @@ function gnmi_restart_daemon(array $device) {
 	$script_path = $config['base_path'] . '/plugins/gnmi/scripts';
 	$daemon_ctl = $script_path . '/gnmi_daemon_ctl.py';
 	$python_bin = gnmi_get_python_binary();
-	$device_id = $device['id'];
 
 	// Build configuration JSON for daemon (Phase 3.3: dynamic subscriptions)
 	$daemon_config = gnmi_build_daemon_config($device_id);

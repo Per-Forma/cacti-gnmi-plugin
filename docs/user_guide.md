@@ -54,8 +54,13 @@ Devices → (create/edit a device)**.
   host via `host_id`).
 - If connection-affecting fields changed, the daemon is **restarted**
   automatically (hot reload — no manual action needed).
-- If you uncheck **Enable gNMI Telemetry** and save, the daemon is stopped
-  gracefully and the gNMI config row is removed.
+- If you uncheck **Enable gNMI Telemetry** and save, the collector stops, the device
+  is marked disabled (`enabled = 0`), and your saved connection settings and
+  subscriptions remain. Check the box again and save to resume collection on a
+  later poller cycle when an enabled subscription and metric exist. If the disable
+  cannot be saved, the page reports that existing collection is unchanged. If
+  the disable is saved but the collector cannot be stopped immediately, the page
+  reports that the next poller cycle will stop the leftover collector.
 
 > The daemon only starts once the device has at least one **enabled subscription
 > with at least one metric**. A device with no subscriptions is saved but idle.

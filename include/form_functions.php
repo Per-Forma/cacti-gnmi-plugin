@@ -333,6 +333,73 @@ function gnmi_detect_config_changes($existing_device, $post_data) {
 }
 
 /**
+ * Pause gNMI collection for a host while retaining saved configuration.
+ *
+ * @param int $host_id Cacti host.id being saved
+ * @return bool True when pause completed or no row exists; false on lock/update/stop failure
+ */
+function gnmi_apply_device_pause($host_id) {
+	global $config;
+
+	$device = db_fetch_row_prepared(
+		'SELECT id FROM plugin_gnmi_devices WHERE host_id = ?',
+		array($host_id)
+	);
+	if (empty($device)) {
+		return true;
+	}
+
+	$updated = false;
+	$stopped = false;
+	$locked = gnmi_with_poller_exclusive_lock(function () use ($host_id, $device, &$updated, &$stopped) {
+		global $config;
+
+		$updated = db_execute_prepared(
+			'UPDATE plugin_gnmi_devices SET enabled = 0 WHERE host_id = ?',
+			array($host_id)
+		);
+		if ($updated === false) {
+			raise_message(
+				'gnmi_disable_failed',
+				__('gNMI could not be disabled. Existing collection is unchanged.'),
+				MESSAGE_LEVEL_ERROR
+			);
+			cacti_log('gNMI: Could not disable host_id=' . $host_id, false, 'gnmi');
+			return;
+		}
+
+		if (!function_exists('gnmi_stop_daemon')) {
+			include_once($config['base_path'] . '/plugins/gnmi/include/functions.php');
+		}
+
+		$stopped = gnmi_stop_daemon((int) $device['id']);
+		if ($stopped !== true) {
+			raise_message(
+				'gnmi_disable_stop_failed',
+				__('gNMI is disabled, but the collector could not be stopped. The next poller cycle will stop a leftover collector.'),
+				MESSAGE_LEVEL_ERROR
+			);
+			cacti_log('gNMI: Disabled host_id=' . $host_id . ' but collector stop failed', false, 'gnmi');
+		}
+		else {
+			cacti_log("gNMI: Paused collection for host_id=$host_id (device_id={$device['id']})", false, 'gnmi');
+		}
+	}, null, true);
+
+	if ($locked !== true) {
+		raise_message(
+			'gnmi_disable_failed',
+			__('gNMI could not be disabled. Existing collection is unchanged.'),
+			MESSAGE_LEVEL_ERROR
+		);
+		cacti_log('gNMI: Could not lock poller state while disabling host_id=' . $host_id, false, 'gnmi');
+		return false;
+	}
+
+	return $updated === true && $stopped === true;
+}
+
+/**
  * Process gNMI device save from form submission
  *
  * Validates input, inserts/updates plugin_gnmi_device_settings record,
@@ -348,35 +415,16 @@ function gnmi_process_device_save($host_id) {
 	$gnmi_enabled_value = isset($_POST['gnmi_enabled']) ? $_POST['gnmi_enabled'] : 'NOT SET';
 	cacti_log("gNMI DEBUG: gnmi_enabled in POST = '$gnmi_enabled_value' for host_id=$host_id", false, 'gnmi', POLLER_VERBOSITY_DEBUG);
 
-	// Check if gNMI is enabled in form
+	if (!isset($_POST['gnmi_form_present'])) {
+		return true;
+	}
+
 	if (!isset($_POST['gnmi_enabled']) || $_POST['gnmi_enabled'] != 1) {
-		// BEFORE deleting record, stop the daemon gracefully
-		$device = db_fetch_row_prepared(
-			'SELECT id FROM plugin_gnmi_devices WHERE host_id = ?',
-			array($host_id)
-		);
-
-		if (!empty($device)) {
-			$device_id = $device['id'];
-
-			// Include functions.php for gnmi_stop_daemon()
-			global $config;
-			if (!function_exists('gnmi_stop_daemon')) {
-				include_once($config['base_path'] . '/plugins/gnmi/include/functions.php');
-			}
-
-			// Stop daemon gracefully
-			cacti_log("gNMI: Stopping daemon for device_id=$device_id (gNMI disabled for host_id=$host_id)", false, 'gnmi');
-			gnmi_stop_daemon($device_id);
+		if (!function_exists('gnmi_with_poller_exclusive_lock')) {
+			include_once($config['base_path'] . '/plugins/gnmi/include/functions.php');
 		}
 
-		// gNMI not enabled - delete from consolidated table
-		db_execute_prepared(
-			'DELETE FROM plugin_gnmi_devices WHERE host_id = ?',
-			array($host_id)
-		);
-		cacti_log("gNMI disabled for host_id=$host_id", false, 'gnmi');
-		return true;
+		return gnmi_apply_device_pause($host_id);
 	}
 
 	$existing_device = db_fetch_row_prepared(
@@ -640,6 +688,7 @@ function gnmi_render_device_form_section($host_id, $gnmi_settings = [], $metric_
 			<label for="gnmi_enabled">Enable gNMI Telemetry</label>
 		</td>
 		<td>
+			<input type="hidden" name="gnmi_form_present" value="1">
 			<input type="checkbox" id="gnmi_enabled" name="gnmi_enabled"
 				   value="1" <?php echo ($gnmi_settings['enabled'] ? 'checked' : ''); ?>
 				   onchange="toggleGnmiSettings()">
@@ -883,7 +932,7 @@ function gnmi_render_device_form_section($host_id, $gnmi_settings = [], $metric_
 	<?php endif; ?>
 
 	<!-- Phase 3.3: Subscriptions & Metrics Management -->
-	<?php if ($host_id > 0 && !empty($gnmi_settings) && $gnmi_settings['enabled']): ?>
+	<?php if ($host_id > 0 && !empty($gnmi_settings['id'])): ?>
 		<tr class="gnmi-setting-row tableHeader" style="<?php echo $gnmi_display; ?>">
 			<td colspan="2" class="tableSubHeaderColumn">Subscriptions &amp; Metrics</td>
 		</tr>
