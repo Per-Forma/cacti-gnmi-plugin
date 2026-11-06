@@ -94,6 +94,17 @@ function db_fetch_assoc($sql) {
 	return $device_rows;
 }
 
+// Hidden detail rows call gnmi_get_daemon_stats() and gnmi_get_recent_events(),
+// which use Cacti's prepared fetchers. This harness has no database. An empty
+// result keeps the renderer's existing "no stats / no events" path.
+function db_fetch_row_prepared($sql, $params = array()) {
+	return false;
+}
+
+function db_fetch_assoc_prepared($sql, $params = array()) {
+	return array();
+}
+
 require_once __DIR__ . '/../../include/functions.php';
 require_once __DIR__ . '/../../include/status_functions.php';
 require_once __DIR__ . '/../../include/status_display.php';
