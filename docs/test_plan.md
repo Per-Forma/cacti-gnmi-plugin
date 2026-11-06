@@ -71,7 +71,8 @@ defined by this test plan.
 | 4.1 | Change the device port/credentials and save | Config change detected; daemon auto-restarts within ~1–2 cycles; new config in `storage/device_<id>.json` |
 | 4.2 | Disable a subscription | Its metrics stop updating; daemon reloads; other subscriptions unaffected |
 | 4.3 | Add a second subscription/instance on the same device | Both instances stream independently; no cross-instance contamination in storage (each instance's history holds only its own counters) |
-| 4.4 | Uncheck **Enable gNMI Telemetry**, save | Daemon stops gracefully (<~5 s); gNMI config row removed |
+| 4.4 | Uncheck **Enable gNMI Telemetry**, save | Daemon stops gracefully (<~5 s); `plugin_gnmi_devices` row remains with `enabled = 0`; subscriptions and credentials remain |
+| 4.4b | Re-check **Enable gNMI Telemetry** on the same device and save | `enabled` returns to `1` without recreating subscriptions; collection resumes on a later poller cycle |
 | 4.5 | Delete the Cacti host | CASCADE removes gNMI rows; daemon stopped; no orphan process remains |
 | 4.6 | Manually orphan a daemon (kill DB row / leave PID), wait one cycle | Orphan detected and cleaned automatically; dashboard orphan widget reflects it |
 
