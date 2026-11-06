@@ -178,7 +178,11 @@ function gnmi_get_recent_events($device_id = null, $event_type = null, $limit = 
 }
 
 /**
- * Get dashboard summary for all enabled gNMI devices.
+ * Get dashboard summary for gNMI devices the current user may view.
+ *
+ * Returns one row per saved device when collection is enabled (`enabled = 1`)
+ * or paused (`enabled = 0`). Paused rows use health `paused` without scoring
+ * daemon state or data freshness.
  *
  * Returns array of device status summaries including daemon health,
  * last poll status, and data freshness.
@@ -186,11 +190,12 @@ function gnmi_get_recent_events($device_id = null, $event_type = null, $limit = 
  * @return array Array of device summaries
  */
 function gnmi_get_dashboard_summary() {
-	// Get all enabled devices with Cacti host information
+	// All saved devices with Cacti host information (enabled and paused)
 	$devices = db_fetch_assoc('
 		SELECT
 			d.id as device_id,
 			d.host_id,
+			d.enabled,
 			d.hostname,
 			d.tls_cipher_policy,
 			d.last_poll_time,
@@ -199,7 +204,6 @@ function gnmi_get_dashboard_summary() {
 			h.description as device_description
 		FROM plugin_gnmi_devices d
 		LEFT JOIN host h ON d.host_id = h.id
-		WHERE d.enabled = 1
 		ORDER BY h.description, d.hostname
 	');
 
@@ -208,6 +212,7 @@ function gnmi_get_dashboard_summary() {
 	foreach ($devices as $device) {
 		if (!gnmi_current_user_can_view_host($device['host_id'])) { continue; }
 		$device_id = $device['device_id'];
+		$collection_enabled = ((int) $device['enabled'] === 1);
 
 		// Get daemon status
 		$storage_dir = gnmi_get_storage_dir();
@@ -227,12 +232,14 @@ function gnmi_get_dashboard_summary() {
 		// Get data freshness
 		$data_age_seconds = gnmi_get_data_freshness($device_id);
 
-		// Calculate overall health status
-		$health = gnmi_calculate_health_status($daemon_status, $data_age_seconds, $device['last_poll_status']);
+		// Paused collection: show factual daemon and age, but do not score health.
+		$health = $collection_enabled
+			? gnmi_calculate_health_status($daemon_status, $data_age_seconds, $device['last_poll_status'])
+			: 'paused';
 
 		$summary[] = array(
 			'device_id' => $device_id,
-			'enabled' => 1,
+			'enabled' => $collection_enabled ? 1 : 0,
 			'host_id' => $device['host_id'],
 			'hostname' => $device['hostname'],
 			'tls_cipher_policy' => (($device['tls_cipher_policy'] ?? 'default') === 'legacy_compatibility')

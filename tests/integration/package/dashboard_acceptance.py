@@ -69,12 +69,17 @@ def main():
                 continue
             assert 'ERROR-MARKER-B' not in html and 'EVENT-MARKER-B' not in html, name + ': hidden B details leaked'
             assert 'ERROR-MARKER-deleted' not in html, 'Deleted host leaked'
-            assert 'ERROR-MARKER-disabled' not in html, 'Disabled plugin leaked'
             if name == 'empty':
                 assert 'No accessible gNMI devices are currently enabled.' in html
                 assert 'host.php">Add devices' not in html
             else:
                 assert 'ERROR-MARKER-A' in html and 'EVENT-MARKER-A' in html, name + ': allowed details missing'
+                assert 'ERROR-MARKER-disabled' in html, name + ': paused device marker missing from dashboard'
+                assert 'Paused' in html, name + ': paused health badge missing'
+                denied_restart = (
+                    'name="device_id" value="' + str(devices['disabled']['id']) + '"'
+                )
+                assert denied_restart not in html, name + ': restart form targets paused device'
             can_restart = name in ('operator', 'admin', 'group')
             assert ('value="restart"' in html) == can_restart, name + ': wrong restart control'
             assert ('Orphaned Daemons' in html) == (name in ('installer', 'admin')), name + ': wrong orphan panel'

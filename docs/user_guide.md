@@ -10,9 +10,10 @@ dashboard. For first-time setup, see [install.md](install.md).
 
 The plugin layers a few concepts on top of Cacti's normal device model:
 
-- **Device** — a Cacti host with gNMI enabled. Connection settings live in the
-  device edit form and are stored in `plugin_gnmi_devices`. Each enabled device
-  gets one long-running daemon.
+- **Device** — a Cacti host with gNMI configured (telemetry may be enabled or
+  paused). Connection settings live in the device edit form and are stored in
+  `plugin_gnmi_devices`. Each **enabled** device gets one long-running daemon;
+  pausing stops collection but keeps the row and settings.
 - **Subscription** — a gNMI path the daemon streams, scoped to one **instance**
   (e.g. a single interface). A device can have many subscriptions.
 - **Metric** — a single counter/gauge leaf within a subscription (e.g.
@@ -61,6 +62,12 @@ Devices → (create/edit a device)**.
   cannot be saved, the page reports that existing collection is unchanged. If
   the disable is saved but the collector cannot be stopped immediately, the page
   reports that the next poller cycle will stop the leftover collector.
+
+The device remains listed on **Console → Plugins → gNMI Telemetry** with
+**Health** showing **Paused** (blue badge). **Daemon** still reports `stopped` or
+`running`; `running` means a leftover collector has not been stopped yet. Health
+stays **Paused** either way. **Details** works as usual. **Restart** is not shown
+until you check **Enable gNMI Telemetry** and save again.
 
 > The daemon only starts once the device has at least one **enabled subscription
 > with at least one metric**. A device with no subscriptions is saved but idle.
@@ -160,14 +167,18 @@ graphs belong.
 **Console → Plugins → gNMI Telemetry** opens the dashboard. Each dashboard
 retains its own View gNMI realm. Rows, hidden Details, errors, and events include
 only devices the current user may view under Cacti's effective device/graph
-policies, enabled-group grants, and hide-disabled preference. An enabled gNMI
-configuration on a hidden disabled or deleted Cacti host is unavailable here.
+policies, enabled-group grants, and hide-disabled preference. A gNMI configuration
+(telemetry enabled or paused) on a hidden disabled or deleted Cacti host is
+unavailable here.
 An empty result says **No accessible gNMI devices are currently enabled.**
 
 It shows, per accessible device:
 
-- **Health** — `healthy` / `warning` / `critical` / `unknown`, based on daemon
-  state and data freshness.
+- **Health** — `healthy` / `warning` / `critical` / `unknown` / `paused`. The
+  first four reflect daemon state and data freshness when collection is enabled.
+  **`paused`** means collection is off (`Enable gNMI Telemetry` unchecked) but
+  the saved connection settings and subscriptions remain; it is not derived from
+  daemon state, data age, or last poll status.
 - **Daemon** — running/stopped, PID, uptime, memory usage.
 - **Data freshness** — time since the last JSON write; stale data (older than
   ~2× the poller interval) is flagged.
@@ -202,6 +213,7 @@ reads preserve stale PID files for trusted lifecycle cleanup.
 | Task | Where |
 |------|-------|
 | Add a gNMI device | Device edit form → Enable gNMI Telemetry |
+| Pause collection (keep settings) | Device edit form → uncheck **Enable gNMI Telemetry** → Save — dashboard shows **Paused** |
 | Change credentials / port | Device edit form → Save (daemon auto-restarts) |
 | Add/remove a metric | Device edit form → Subscription metric table |
 | Create a graph now | Metric row → **Create Graph** |

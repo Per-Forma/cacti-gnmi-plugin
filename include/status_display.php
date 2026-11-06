@@ -43,6 +43,8 @@ function gnmi_render_summary_table($devices) {
 	$html .= '<tbody>';
 	foreach ($devices as $device) {
 		if (!gnmi_current_user_can_view_host($device['host_id'] ?? 0)) { continue; }
+		// Paused collection: key present and zero — callers that omit `enabled` behave as before.
+		$paused = array_key_exists('enabled', $device) && empty($device['enabled']);
 		$html .= '<tr>';
 
 		// Device description
@@ -74,7 +76,7 @@ function gnmi_render_summary_table($devices) {
 		if ($device['data_age_seconds'] !== null) {
 			$data_age_display = $device['data_age_seconds'] . 's ago';
 			// Red when age exceeds one full poller interval (warning-level threshold)
-			if ($device['data_age_seconds'] > gnmi_get_poller_interval()) {
+			if (!$paused && $device['data_age_seconds'] > gnmi_get_poller_interval()) {
 				$data_age_display = '<span style="color:red;">' . $data_age_display . '</span>';
 			}
 		}
@@ -87,7 +89,9 @@ function gnmi_render_summary_table($devices) {
 		// Actions (expand details, restart daemon)
 		$html .= '<td>';
 		$html .= '<a href="#" onclick="toggleDeviceDetails(' . $device['device_id'] . '); return false;">Details</a>';
-		if (!gnmi_web_authorization_required() || gnmi_current_user_can_restart_device($device)) {
+		$show_restart = !$paused && (!gnmi_web_authorization_required()
+			|| gnmi_current_user_can_restart_device($device));
+		if ($show_restart) {
 			$html .= ' | ';
 			$html .= '<form method="post" action="" style="display:inline">';
 			$html .= '<input type="hidden" name="action" value="restart">';
@@ -116,7 +120,7 @@ function gnmi_render_summary_table($devices) {
 /**
  * Render health status badge with color coding.
  *
- * @param string $health Health status: healthy|warning|critical|unknown
+ * @param string $health Health status: healthy|warning|critical|unknown|paused
  * @return string HTML span with styled badge
  */
 function gnmi_render_health_badge($health) {
@@ -124,14 +128,16 @@ function gnmi_render_health_badge($health) {
 		'healthy' => '#28a745',   // Green
 		'warning' => '#ffc107',   // Yellow
 		'critical' => '#dc3545',  // Red
-		'unknown' => '#6c757d'    // Gray
+		'unknown' => '#6c757d',   // Gray
+		'paused' => '#5b6abf',    // Distinct blue — collection disabled, config retained
 	);
 
 	$icons = array(
 		'healthy' => '✓',
 		'warning' => '⚠',
 		'critical' => '✗',
-		'unknown' => '?'
+		'unknown' => '?',
+		'paused' => '❚❚',
 	);
 
 	$color = $colors[$health] ?? $colors['unknown'];
