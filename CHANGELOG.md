@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Keep a paused gNMI device on the status dashboard with health **Paused**.
+  Daemon state and data age stay factual, and Restart stays hidden until
+  collection is enabled again.
 - Make archive installation self-contained: verify both checksum layers, reject
   occupied/symlink destinations, build pinned dependencies at their final Linux
   path, and keep code/venv administrator-owned with service-owned runtime.

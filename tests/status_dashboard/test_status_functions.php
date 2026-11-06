@@ -75,13 +75,13 @@ function test_dashboard_summary_returns_array() {
 	assert_true(is_array($summary), "Dashboard summary should return array");
 }
 
-// Test 2: Summary includes all enabled devices
+// Test 2: Summary includes every saved device visible to this context
 function test_dashboard_summary_enabled_devices() {
 	$summary = gnmi_get_dashboard_summary();
 
-	// Count enabled devices in database
-	$enabled_count = db_fetch_cell('SELECT COUNT(*) FROM plugin_gnmi_devices WHERE enabled = 1');
-	assert_equals(intval($enabled_count), count($summary), "Summary should include all enabled devices (found " . count($summary) . ", expected $enabled_count)");
+	// CLI harness: all plugin devices are visible; summary includes enabled and paused rows
+	$device_count = db_fetch_cell('SELECT COUNT(*) FROM plugin_gnmi_devices');
+	assert_equals(intval($device_count), count($summary), "Summary should include all saved devices (found " . count($summary) . ", expected $device_count)");
 }
 
 // Test 3: Summary includes required fields
