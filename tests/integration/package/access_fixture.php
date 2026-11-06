@@ -83,7 +83,14 @@ if ($mode === 'setup') {
             db_execute_prepared('INSERT INTO user_auth_realm (realm_id,user_id) VALUES (?,?)', array($realm, $id));
         }
         if ($name !== 'empty' && $name !== 'group') {
-            db_execute_prepared('INSERT INTO user_auth_perms (user_id,item_id,type) VALUES (?,?,3)', array($id, $devices['A']['host_id']));
+            // Per-host device policy: same users who may view A may also view the paused
+            // ACCESS-disabled host so the dashboard can show a paused row (#41).
+            foreach (array('A', 'disabled') as $perm_key) {
+                db_execute_prepared(
+                    'INSERT INTO user_auth_perms (user_id,item_id,type) VALUES (?,?,3)',
+                    array($id, $devices[$perm_key]['host_id'])
+                );
+            }
         }
     }
     foreach (array('group'=>'on', 'disabled-group'=>'') as $name=>$enabled) {
@@ -91,12 +98,19 @@ if ($mode === 'setup') {
             'graph_settings'=>'on', 'policy_hosts'=>2, 'policy_graphs'=>2, 'policy_graph_templates'=>2, 'policy_trees'=>2), 'user_auth_group');
         db_execute_prepared('INSERT INTO user_auth_group_members (group_id,user_id) VALUES (?,?)', array($group_id,$users[$name]));
         db_execute_prepared('INSERT INTO user_auth_group_realm (group_id,realm_id) VALUES (?,?)', array($group_id,access_realm('dashboard_actions.php')));
-        db_execute_prepared('INSERT INTO user_auth_group_perms (group_id,item_id,type) VALUES (?,?,3)', array($group_id,$devices['A']['host_id']));
+        foreach (array('A', 'disabled') as $perm_key) {
+            db_execute_prepared(
+                'INSERT INTO user_auth_group_perms (group_id,item_id,type) VALUES (?,?,3)',
+                array($group_id, $devices[$perm_key]['host_id'])
+            );
+        }
     }
     db_execute("REPLACE INTO settings (name,value) VALUES ('graph_auth_method','3')");
     // Validate fixture expectations through Cacti itself, not plugin mocks.
     foreach ($users as $name=>$id) {
-        access_require(is_device_allowed($devices['A']['host_id'], $id) === ($name !== 'empty'), 'Unexpected effective A policy: ' . $name);
+        $may_see_a = ($name !== 'empty');
+        access_require(is_device_allowed($devices['A']['host_id'], $id) === $may_see_a, 'Unexpected effective A policy: ' . $name);
+        access_require(is_device_allowed($devices['disabled']['host_id'], $id) === $may_see_a, 'Unexpected effective paused-host policy: ' . $name);
         access_require(!is_device_allowed($devices['B']['host_id'], $id), 'B must be denied: ' . $name);
     }
     echo json_encode(array('devices'=>$devices, 'users'=>$users, 'cacti'=>$config['cacti_db_version'], 'php'=>PHP_VERSION));
