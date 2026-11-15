@@ -77,6 +77,33 @@ $log_blob = implode("\n", $GLOBALS['logged_messages']);
 assert_true(strpos($log_blob, 'disabled device 7') !== false, 'start_daemon logs disabled device');
 assert_true(strpos($log_blob, 'Virtual environment not found') === false, 'start_daemon fails for disabled reason not venv');
 
+// Dashboard and subscription restarts call gnmi_restart_daemon() with the
+// in-memory device row. That row can still say enabled = 1 after the database
+// row is paused. The restart function has its own disabled-device return,
+// before it builds a config or execs daemon_ctl.
+//
+// gnmi_build_daemon_config() logs the same "disabled device" sentence and
+// then gnmi_restart_daemon() logs "Cannot restart daemon". Seeing that second
+// sentence means the restart guard was skipped. A temp base_path keeps a
+// skipped guard from including the real status helpers or finding a venv;
+// the assertions then fail on the log, not on a missing Cacti tree.
+$GLOBALS['logged_messages'] = array();
+$GLOBALS['subscription_reads'] = 0;
+$config['base_path'] = sys_get_temp_dir() . '/gnmi-restart-paused-' . getmypid();
+$result = gnmi_restart_daemon($snapshot);
+assert_true($result === false, 'restart_daemon refuses stale enabled snapshot');
+$log_blob = implode("\n", $GLOBALS['logged_messages']);
+assert_true(
+	strpos($log_blob, 'Not starting collector for disabled device 7') !== false,
+	'restart_daemon logs disabled device'
+);
+assert_true(
+	strpos($log_blob, 'Cannot restart daemon') === false,
+	'restart_daemon returns before the collector start command'
+);
+assert_true($GLOBALS['subscription_reads'] === 0, 'restart_daemon does not load subscriptions when disabled');
+assert_true(strpos($log_blob, 'Daemon started') === false, 'restart_daemon does not start the collector');
+
 echo "\nTests Run: $tests_run\n";
 echo "Tests Failed: $tests_failed\n";
 exit($tests_failed > 0 ? 1 : 0);
