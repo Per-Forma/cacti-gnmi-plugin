@@ -3,6 +3,7 @@ runtime/
 storage/
 certs/
 logs/
+.cursor/
 *.rrd
 *.log
 *.pid
@@ -43,6 +44,14 @@ build/
 evidence/
 *.tar.gz
 *.sha256
+
+# Local Cacti Docker stack. These directories hold a personal compose
+# project, its live MariaDB/RRD/log/plugin mounts, and volume snapshots.
+# The plugin's tracked Docker assets live under tests/integration/ and
+# deployment/. Ignoring the directories leaves them on disk.
+cacti-docker-compose/
+docker-local-backups/
+local-fresh-cacti/
 
 # Editors and operating systems
 .DS_Store
